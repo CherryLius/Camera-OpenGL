@@ -1,5 +1,1 @@
-<manifest package="cherry.android.camera">
-
-    <application />
-
-</manifest>
+<manifest package="cherry.android.camera" />

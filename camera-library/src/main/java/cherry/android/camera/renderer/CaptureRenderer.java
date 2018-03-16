@@ -11,7 +11,8 @@ import android.support.v4.util.ArrayMap;
 import javax.microedition.khronos.egl.EGLConfig;
 import javax.microedition.khronos.opengles.GL10;
 
-import cherry.android.camera.CameraCompact;
+import cherry.android.camera.annotations.CameraId;
+import cherry.android.camera.camera.CameraCompact;
 import cherry.android.camera.filter.ImageFilter;
 import cherry.android.camera.filter.RendererFilter;
 import cherry.android.camera.filter.YUVFilter;
@@ -39,15 +40,15 @@ public class CaptureRenderer implements GLSurfaceView.Renderer, SurfaceTexture.O
     private ArrayMap<Integer, RendererFilter> mFilterMap;
     private Bitmap mBitmap;
 
-    static final int STATE_CAPTURE = 0;
-    static final int STATE_PICTURE = 1;
+    public static final int STATE_CAPTURE = 0;
+    public static final int STATE_PICTURE = 1;
     private int mState;
 
     private OnFilterChangeListener mFilterChangeListener;
 
-    public CaptureRenderer(@NonNull Context context, @NonNull GLSurfaceView glSurfaceView) {
-        mContext = context;
+    public CaptureRenderer(@NonNull GLSurfaceView glSurfaceView) {
         mGLSurfaceView = glSurfaceView;
+        mContext = glSurfaceView.getContext();
         mState = STATE_CAPTURE;
 
         mFilterMap = new ArrayMap<>(2);
@@ -59,8 +60,7 @@ public class CaptureRenderer implements GLSurfaceView.Renderer, SurfaceTexture.O
         mSurfaceTexture = new SurfaceTexture(mTextureId);
         mSurfaceTexture.setOnFrameAvailableListener(CaptureRenderer.this);
 
-        mCameraCompact = new CameraCompact(context);
-        mCameraCompact.setSurfaceTexture(mSurfaceTexture);
+        mCameraCompact = new CameraCompact(mContext,mSurfaceTexture);
 
         mGLSurfaceView.setEGLContextClientVersion(2);
         mGLSurfaceView.setRenderer(this);
@@ -80,6 +80,7 @@ public class CaptureRenderer implements GLSurfaceView.Renderer, SurfaceTexture.O
 
     @Override
     public void onSurfaceChanged(GL10 gl, int width, int height) {
+        Logger.v(TAG, "[onSurfaceChanged] width=" + width + "x" + height);
         GLES20.glViewport(0, 0, width, height);
     }
 
@@ -103,7 +104,7 @@ public class CaptureRenderer implements GLSurfaceView.Renderer, SurfaceTexture.O
 
     public void resume() {
         mGLSurfaceView.onResume();
-        mCameraCompact.start();
+        mCameraCompact.start(CameraId.CAMERA_BACK);
         boolean flipHorizontal = mCameraCompact.isFrontCamera();
         Logger.d(TAG, "orientation=" + mCameraCompact.getOrientation());
         adjustPosition(mCameraCompact.getOrientation(), flipHorizontal, !flipHorizontal);

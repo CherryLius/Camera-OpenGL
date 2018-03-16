@@ -3,9 +3,11 @@ package cherry.android.camera.util;
 import android.content.Context;
 import android.graphics.Point;
 import android.support.annotation.NonNull;
-import android.util.Size;
 import android.view.Display;
+import android.view.Surface;
 import android.view.WindowManager;
+
+import cherry.android.camera.SizeSupplier;
 
 /**
  * Created by Administrator on 2017/4/10.
@@ -23,7 +25,9 @@ public class CameraUtil {
         return (T) context.getSystemService(serviceName);
     }
 
-    public static double findFullscreenRatio(Context context, Size[] choiceSizes) {
+    public static <T> double findFullscreenRatio(@NonNull Context context,
+                                                 @NonNull T[] choiceSizes,
+                                                 @NonNull SizeSupplier<T> supplier) {
         double find = 4d / 3;
         if (context != null && choiceSizes != null) {
             WindowManager wm = (WindowManager) context.getSystemService(Context.WINDOW_SERVICE);
@@ -43,8 +47,8 @@ public class CameraUtil {
                     find = RATIOS[i];
                 }
             }
-            for (Size size : choiceSizes) {
-                if (toleranceRatio(find, (double) size.getWidth() / size.getHeight())) {
+            for (T size : choiceSizes) {
+                if (toleranceRatio(find, (double) supplier.width(size) / supplier.height(size))) {
                     Logger.i(TAG, "findFullscreenRatio(" + choiceSizes + ") return " + find);
                     return find;
                 }
@@ -64,15 +68,52 @@ public class CameraUtil {
         return tolerance;
     }
 
-    public static Size getOptimalPreviewSize(Context context, Size[] sizes, double targetRatio,
-                                             boolean findMinalRatio) {
+    public static <T> T getOptimalPreviewSize2(@NonNull Context context,
+                                               T[] sizes,
+                                               double targetRatio,
+                                               boolean findMinalRatio,
+                                               @NonNull SizeSupplier<T> supplier) {
         // Use a very small tolerance because we want an exact match.
         // final double EXACTLY_EQUAL = 0.001;
         if (sizes == null) {
             return null;
         }
 
-        Size optimalSize = null;
+        // Try to find an size match aspect ratio and size
+        T max = null;
+        for (T size : sizes) {
+            if (max == null) {
+                max = size;
+            }
+            final int width = supplier.width(size);
+            final int height = supplier.height(size);
+            final int maxW = supplier.width(max);
+            final int maxH = supplier.height(max);
+            if (maxW * maxH < width * height) {
+                max = size;
+            }
+        }
+
+        // Cannot find the one match the aspect ratio. This should not happen.
+        // Ignore the requirement.
+        // / M: This will happen when native return video size and wallpaper
+        // want to get specified ratio.
+        Logger.i(TAG, "max=" + supplier.width(max) + ", " + supplier.height(max));
+        return max;
+    }
+
+    public static <T> T getOptimalPreviewSize(@NonNull Context context,
+                                              T[] sizes,
+                                              double targetRatio,
+                                              boolean findMinalRatio,
+                                              @NonNull SizeSupplier<T> supplier) {
+        // Use a very small tolerance because we want an exact match.
+        // final double EXACTLY_EQUAL = 0.001;
+        if (sizes == null) {
+            return null;
+        }
+
+        T optimalSize = null;
 
         double minDiff = Double.MAX_VALUE;
         double minDiffWidth = Double.MAX_VALUE;
@@ -92,8 +133,8 @@ public class CameraUtil {
             // Find minimal aspect ratio for that: special video size maybe not
             // have the mapping preview size.
             double minAspectio = Double.MAX_VALUE;
-            for (Size size : sizes) {
-                double aspectRatio = (double) size.getWidth() / size.getHeight();
+            for (T size : sizes) {
+                double aspectRatio = (double) supplier.width(size) / supplier.height(size);
                 if (Math.abs(aspectRatio - targetRatio) <= Math.abs(minAspectio - targetRatio)) {
                     minAspectio = aspectRatio;
                 }
@@ -103,20 +144,20 @@ public class CameraUtil {
         }
 
         // Try to find an size match aspect ratio and size
-        for (Size size : sizes) {
-            double ratio = (double) size.getWidth() / size.getHeight();
+        for (T size : sizes) {
+            double ratio = (double) supplier.width(size) / supplier.height(size);
             if (Math.abs(ratio - targetRatio) > ASPECT_TOLERANCE) {
                 continue;
             }
 
-            if (Math.abs(size.getHeight() - targetHeight) < minDiff) {
+            if (Math.abs(supplier.height(size) - targetHeight) < minDiff) {
                 optimalSize = size;
-                minDiff = Math.abs(size.getHeight() - targetHeight);
-                minDiffWidth = Math.abs(size.getWidth() - targetWidth);
-            } else if ((Math.abs(size.getHeight() - targetHeight) == minDiff)
-                    && Math.abs(size.getWidth() - targetWidth) < minDiffWidth) {
+                minDiff = Math.abs(supplier.height(size) - targetHeight);
+                minDiffWidth = Math.abs(supplier.width(size) - targetWidth);
+            } else if ((Math.abs(supplier.height(size) - targetHeight) == minDiff)
+                    && Math.abs(supplier.width(size) - targetWidth) < minDiffWidth) {
                 optimalSize = size;
-                minDiffWidth = Math.abs(size.getWidth() - targetWidth);
+                minDiffWidth = Math.abs(supplier.width(size) - targetWidth);
             }
         }
 
@@ -129,42 +170,102 @@ public class CameraUtil {
                     + "then use the standard(4:3) preview size");
             minDiff = Double.MAX_VALUE;
             targetRatio = Double.parseDouble("1.3333");
-            for (Size size : sizes) {
-                double ratio = (double) size.getWidth() / size.getHeight();
+            for (T size : sizes) {
+                double ratio = (double) supplier.width(size) / supplier.height(size);
                 if (Math.abs(ratio - targetRatio) > ASPECT_TOLERANCE) {
                     continue;
                 }
-                if (Math.abs(size.getHeight() - targetHeight) < minDiff) {
+                if (Math.abs(supplier.height(size) - targetHeight) < minDiff) {
                     optimalSize = size;
-                    minDiff = Math.abs(size.getHeight() - targetHeight);
+                    minDiff = Math.abs(supplier.height(size) - targetHeight);
                 }
             }
         }
         return optimalSize;
     }
 
-    public static Size getOptimalPictureSize(Size[] sizes, double targetRatio) {
+    public static <T> T getOptimalPreviewSizeWithTarget(T[] sizes,
+                                                        int targetWidth,
+                                                        int targetHeight,
+                                                        @NonNull SizeSupplier<T> supplier) {
+        // Use a very small tolerance because we want an exact match.
+        // final double EXACTLY_EQUAL = 0.001;
+        if (sizes == null) {
+            return null;
+        }
+
+        T optimalSize = null;
+
+        double minDiff = Double.MAX_VALUE;
+        double minDiffWidth = Double.MAX_VALUE;
+
+        double targetRatio = Math.max(targetWidth, targetHeight) * 1.0d / Math.min(targetWidth, targetHeight);
+
+        // Try to find an size match aspect ratio and size
+        for (T size : sizes) {
+            double ratio = (double) supplier.width(size) / supplier.height(size);
+            if (Math.abs(ratio - targetRatio) > ASPECT_TOLERANCE) {
+                continue;
+            }
+
+            if (Math.abs(supplier.height(size) - targetHeight) < minDiff) {
+                optimalSize = size;
+                minDiff = Math.abs(supplier.height(size) - targetHeight);
+                minDiffWidth = Math.abs(supplier.width(size) - targetWidth);
+            } else if ((Math.abs(supplier.height(size) - targetHeight) == minDiff)
+                    && Math.abs(supplier.width(size) - targetWidth) < minDiffWidth) {
+                optimalSize = size;
+                minDiffWidth = Math.abs(supplier.width(size) - targetWidth);
+            }
+        }
+
+        // Cannot find the one match the aspect ratio. This should not happen.
+        // Ignore the requirement.
+        // / M: This will happen when native return video size and wallpaper
+        // want to get specified ratio.
+        if (optimalSize == null) {
+            Logger.w(TAG, "No preview size match the aspect ratio" + targetRatio + ","
+                    + "then use the standard(4:3) preview size");
+            minDiff = Double.MAX_VALUE;
+            targetRatio = Double.parseDouble("1.3333");
+            for (T size : sizes) {
+                double ratio = (double) supplier.width(size) / supplier.height(size);
+                if (Math.abs(ratio - targetRatio) > ASPECT_TOLERANCE) {
+                    continue;
+                }
+                if (Math.abs(supplier.height(size) - targetHeight) < minDiff) {
+                    optimalSize = size;
+                    minDiff = Math.abs(supplier.height(size) - targetHeight);
+                }
+            }
+        }
+        return optimalSize;
+    }
+
+    public static <T> T getOptimalPictureSize(T[] sizes,
+                                              double targetRatio,
+                                              @NonNull SizeSupplier<T> supplier) {
         // Use a very small tolerance because we want an exact match.
         // final double ASPECT_TOLERANCE = 0.003;
         if (sizes == null)
             return null;
 
-        Size optimalSize = null;
+        T optimalSize = null;
 
         // Try to find a size matches aspect ratio and has the largest width
-        Size minSize = null;
-        for (Size size : sizes) {
-            double ratio = (double) size.getWidth() / size.getHeight();
+        T minSize = null;
+        for (T size : sizes) {
+            double ratio = (double) supplier.width(size) / supplier.height(size);
             if (Math.abs(ratio - targetRatio) > ASPECT_TOLERANCE)
                 continue;
             if (minSize == null) {
                 minSize = size;
                 optimalSize = size;
-            } else if (size.getWidth() < minSize.getWidth()) {
+            } else if (supplier.width(size) < supplier.width(minSize)) {
                 optimalSize = minSize;
                 minSize = size;
             } else if (optimalSize == minSize
-                    || size.getWidth() < optimalSize.getWidth()) {
+                    || supplier.width(size) < supplier.width(optimalSize)) {
                 optimalSize = size;
             }
 //            if (optimalSize == null || size.getWidth() < optimalSize.getWidth()) {
@@ -176,12 +277,28 @@ public class CameraUtil {
         // happen.
         // Ignore the requirement.
         if (optimalSize == null) {
-            for (Size size : sizes) {
-                if (optimalSize == null || size.getWidth() > optimalSize.getWidth()) {
+            for (T size : sizes) {
+                if (optimalSize == null || supplier.width(size) > supplier.width(optimalSize)) {
                     optimalSize = size;
                 }
             }
         }
         return optimalSize;
+    }
+
+    public static int getDisplayRotation(Context context) {
+        WindowManager wm = (WindowManager) context.getSystemService(Context.WINDOW_SERVICE);
+        int rotation = wm.getDefaultDisplay().getRotation();
+        switch (rotation) {
+            case Surface.ROTATION_0:
+                return 0;
+            case Surface.ROTATION_90:
+                return 90;
+            case Surface.ROTATION_180:
+                return 180;
+            case Surface.ROTATION_270:
+                return 270;
+        }
+        return 0;
     }
 }

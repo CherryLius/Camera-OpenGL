@@ -18,7 +18,7 @@ public abstract class AbstractCamera<T> implements ICamera {
     protected T mCameraDriver;
     protected final SurfaceTexture mSurfaceTexture;
     private HandlerThread mBackgroundThread;
-    protected Handler mBackgroundHandler;
+    protected Handler mCameraHandler;
 
 
     public AbstractCamera(@NonNull Context context, @NonNull SurfaceTexture texture) {
@@ -32,23 +32,34 @@ public abstract class AbstractCamera<T> implements ICamera {
         startBackgroundThread();
     }
 
+    @CallSuper
+    @Override
+    public void closeCamera() {
+        stopBackgroundThread();
+    }
+
     private void startBackgroundThread() {
         stopBackgroundThread();
         mBackgroundThread = new HandlerThread("Camera");
         mBackgroundThread.start();
-        mBackgroundHandler = new Handler(mBackgroundThread.getLooper());
+        mCameraHandler = new Handler(mBackgroundThread.getLooper());
     }
 
     private void stopBackgroundThread() {
-        if (mBackgroundThread != null && mBackgroundHandler != null) {
-            mBackgroundHandler.removeCallbacksAndMessages(null);
+        if (mBackgroundThread != null && mCameraHandler != null) {
+            mCameraHandler.removeCallbacksAndMessages(null);
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR2) {
                 mBackgroundThread.quitSafely();
             } else {
                 mBackgroundThread.quit();
             }
+            try {
+                mBackgroundThread.join(500L);
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
             mBackgroundThread = null;
-            mBackgroundHandler = null;
+            mCameraHandler = null;
         }
     }
 

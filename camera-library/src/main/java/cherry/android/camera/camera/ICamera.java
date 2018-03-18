@@ -1,7 +1,5 @@
 package cherry.android.camera.camera;
 
-import android.os.Handler;
-
 import java.util.List;
 
 import cherry.android.camera.CaptureCallback;

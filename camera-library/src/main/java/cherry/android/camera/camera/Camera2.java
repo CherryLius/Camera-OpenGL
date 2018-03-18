@@ -15,7 +15,6 @@ import android.hardware.camera2.params.StreamConfigurationMap;
 import android.media.Image;
 import android.media.ImageReader;
 import android.os.Build;
-import android.os.Handler;
 import android.support.annotation.NonNull;
 import android.support.annotation.RequiresApi;
 import android.support.annotation.RequiresPermission;
@@ -101,8 +100,8 @@ import static cherry.android.camera.annotations.CameraState.STATE_PREVIEW;
 
     @RequiresPermission(Manifest.permission.CAMERA)
     @Override
-    public void openCamera(@CameraId int cameraId, Handler handler) throws Exception {
-        super.openCamera(cameraId, handler);
+    public void openCamera(@CameraId int cameraId) throws Exception {
+        super.openCamera(cameraId);
         //0为后 1为前
         if (cameraId == CameraId.CAMERA_FRONT) {
             mRealCameraId = CameraCharacteristics.LENS_FACING_BACK;
@@ -118,13 +117,13 @@ import static cherry.android.camera.annotations.CameraState.STATE_PREVIEW;
         Size picSize = CameraUtil.getOptimalPictureSize(sizes, screenRatio, mSupplier);
         Logger.i(TAG, "picture Size: " + picSize.getWidth() + "x" + picSize.getHeight());
         mPictureImageReader = ImageReader.newInstance(picSize.getWidth(), picSize.getHeight(), mImageFormat, 1);
-        mPictureImageReader.setOnImageAvailableListener(this, mBackgroundHandler);
+        mPictureImageReader.setOnImageAvailableListener(this, mCameraHandler);
 
         resolvePreviewSize();
         Logger.e(TAG, "previewSize: " + mPreviewWidth + "x" + mPreviewHeight);
         this.mSurfaceTexture.setDefaultBufferSize(mPreviewWidth, mPreviewHeight);
         mPreviewImageReader = ImageReader.newInstance(mPreviewWidth, mPreviewHeight, mImageFormat, 2);
-        mPreviewImageReader.setOnImageAvailableListener(this, mBackgroundHandler);
+        mPreviewImageReader.setOnImageAvailableListener(this, mCameraHandler);
 
         mCameraManager.openCamera(mRealCameraId + "", new CameraDevice.StateCallback() {
             @Override
@@ -143,11 +142,12 @@ import static cherry.android.camera.annotations.CameraState.STATE_PREVIEW;
                 closeCamera();
                 Logger.e(TAG, "open Camera err: " + error);
             }
-        }, mBackgroundHandler);
+        }, mCameraHandler);
     }
 
     @Override
     public void closeCamera() {
+        super.closeCamera();
         if (mCaptureSession != null) {
             mCaptureSession.close();
             mCaptureSession = null;
@@ -179,7 +179,7 @@ import static cherry.android.camera.annotations.CameraState.STATE_PREVIEW;
                 public void onCaptureCompleted(@NonNull CameraCaptureSession session, @NonNull CaptureRequest request, @NonNull TotalCaptureResult result) {
                     super.onCaptureCompleted(session, request, result);
                 }
-            }, mBackgroundHandler);
+            }, mCameraHandler);
             return;
         }
         mCaptureRequest = createCaptureRequest();
@@ -190,7 +190,7 @@ import static cherry.android.camera.annotations.CameraState.STATE_PREVIEW;
                 super.onCaptureCompleted(session, request, result);
                 Logger.e(TAG, "onCaptureCompleted");
             }
-        }, mBackgroundHandler);
+        }, mCameraHandler);
     }
 
     @Override
@@ -223,7 +223,7 @@ import static cherry.android.camera.annotations.CameraState.STATE_PREVIEW;
                         mContinuous = -1;
                     }
                 }
-            }, mBackgroundHandler);
+            }, mCameraHandler);
         } catch (CameraAccessException e) {
             e.printStackTrace();
             Logger.e(TAG, "CameraAccessException", e);
@@ -256,7 +256,7 @@ import static cherry.android.camera.annotations.CameraState.STATE_PREVIEW;
             Logger.i(TAG, "startPreview");
             mState = STATE_PREVIEW;
             if (mCaptureSession != null && mPreviewRequest != null) {
-                mCaptureSession.setRepeatingRequest(mPreviewRequest, null, mBackgroundHandler);
+                mCaptureSession.setRepeatingRequest(mPreviewRequest, null, mCameraHandler);
                 return;
             }
             final CaptureRequest.Builder requestBuilder = mCameraDriver.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
@@ -279,7 +279,7 @@ import static cherry.android.camera.annotations.CameraState.STATE_PREVIEW;
                         //闪光灯
                         requestBuilder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON_AUTO_FLASH);
                         mPreviewRequest = requestBuilder.build();
-                        mCaptureSession.setRepeatingRequest(mPreviewRequest, null, mBackgroundHandler);
+                        mCaptureSession.setRepeatingRequest(mPreviewRequest, null, mCameraHandler);
                     } catch (CameraAccessException e) {
                         e.printStackTrace();
                     }
@@ -289,7 +289,7 @@ import static cherry.android.camera.annotations.CameraState.STATE_PREVIEW;
                 public void onConfigureFailed(@NonNull CameraCaptureSession session) {
                     Logger.i(TAG, "configure camera failed.");
                 }
-            }, mBackgroundHandler);
+            }, mCameraHandler);
         } catch (CameraAccessException e) {
             e.printStackTrace();
         }

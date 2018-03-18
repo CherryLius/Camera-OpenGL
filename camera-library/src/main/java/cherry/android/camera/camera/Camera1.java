@@ -5,7 +5,6 @@ import android.graphics.ImageFormat;
 import android.graphics.SurfaceTexture;
 import android.hardware.Camera;
 import android.os.Build;
-import android.os.Handler;
 import android.support.annotation.NonNull;
 import android.util.Log;
 
@@ -57,10 +56,10 @@ public class Camera1 extends AbstractCamera<Camera> implements Camera.PreviewCal
         mCameraLock = new ReentrantLock();
     }
 
-
     @Override
     public void setPreviewSize(int width, int height) {
         if (mDefaultPreviewWidth == width && mDefaultPreviewHeight == height) {
+            Logger.i(TAG, "same preview size. skip " + width + "x" + height);
             return;
         }
         mDefaultPreviewWidth = width;
@@ -74,8 +73,7 @@ public class Camera1 extends AbstractCamera<Camera> implements Camera.PreviewCal
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.ICE_CREAM_SANDWICH_MR1) {
                 mSurfaceTexture.setDefaultBufferSize(previewSize.width, previewSize.height);
             }
-            final int size = (previewSize.width * previewSize.height) * ImageFormat.getBitsPerPixel(ImageFormat.NV21) / 8;
-            mCallbackBuffer = new byte[size];
+            mCallbackBuffer = calculateBuffer(previewSize.width, previewSize.height);
             mCameraDriver.addCallbackBuffer(mCallbackBuffer);
             mCameraDriver.setPreviewCallbackWithBuffer(this);
             startPreview();
@@ -83,15 +81,15 @@ public class Camera1 extends AbstractCamera<Camera> implements Camera.PreviewCal
     }
 
     @Override
-    public void openCamera(@CameraId int cameraId, Handler handler) throws Exception {
-        super.openCamera(cameraId, handler);
+    public void openCamera(@CameraId int cameraId) throws Exception {
+        super.openCamera(cameraId);
         if (cameraId == CameraId.CAMERA_FRONT) {
             mRealCameraId = Camera.CameraInfo.CAMERA_FACING_FRONT;
         } else {
             mRealCameraId = Camera.CameraInfo.CAMERA_FACING_BACK;
         }
 
-        handler.post(new Runnable() {
+        mCameraHandler.post(new Runnable() {
             @Override
             public void run() {
                 try {
@@ -105,14 +103,10 @@ public class Camera1 extends AbstractCamera<Camera> implements Camera.PreviewCal
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.ICE_CREAM_SANDWICH_MR1) {
                         mSurfaceTexture.setDefaultBufferSize(previewSize.width, previewSize.height);
                     }
-
-                    final int size = (previewSize.width * previewSize.height) * ImageFormat.getBitsPerPixel(ImageFormat.NV21) / 8;
-                    mCallbackBuffer = new byte[size];
-
                     mCameraDriver.setPreviewTexture(mSurfaceTexture);
+                    mCallbackBuffer = calculateBuffer(previewSize.width, previewSize.height);
                     //preview onPreview
                     mCameraDriver.addCallbackBuffer(mCallbackBuffer);
-                    Logger.e(TAG, "open callback buffer size=" + size);
                     mCameraDriver.setPreviewCallbackWithBuffer(Camera1.this);
                     mCameraDriver.startPreview();
                     mCameraLock.unlock();
@@ -125,6 +119,7 @@ public class Camera1 extends AbstractCamera<Camera> implements Camera.PreviewCal
 
     @Override
     public void closeCamera() {
+        super.closeCamera();
         if (mCameraDriver != null) {
             mCameraLock.lock();
             Logger.i(TAG, "releaseCamera");
@@ -144,7 +139,7 @@ public class Camera1 extends AbstractCamera<Camera> implements Camera.PreviewCal
             @Override
             public void onPictureTaken(byte[] data, Camera camera) {
                 stopPreview();
-                //mBackgroundHandler.post(new ImageSaver(mContext, data, Camera1.this));
+                //mCameraHandler.post(new ImageSaver(mContext, data, Camera1.this));
                 ImageManager.instance().execute(new Camera1CaptureBody(mContext, data, Camera1.this), Camera1.this);
                 //startPreview();
             }
@@ -155,7 +150,7 @@ public class Camera1 extends AbstractCamera<Camera> implements Camera.PreviewCal
     public void captureBurst() {
         final int count = 10;
         mContinuous = 0;
-        mBackgroundHandler.post(new Runnable() {
+        mCameraHandler.post(new Runnable() {
             @Override
             public void run() {
                 mState = STATE_CAPTURE_BURST;
@@ -338,18 +333,18 @@ public class Camera1 extends AbstractCamera<Camera> implements Camera.PreviewCal
         }
     };
 
-    private int mLastWidth;
-
     @Override
     public void onPreviewFrame(byte[] bytes, Camera camera) {
         if (mPreviewCallback != null && camera != null) {
             Camera.Size size = camera.getParameters().getPreviewSize();
-            if (mLastWidth != size.width) {
-                Logger.i(TAG, "onPreview size: " + size.width + "x" + size.height);
-                mLastWidth = size.width;
-            }
             mPreviewCallback.onPreview(this, bytes, size.width, size.height);
         }
         camera.addCallbackBuffer(mCallbackBuffer);
+    }
+
+    private static byte[] calculateBuffer(int width, int height) {
+        final int size = (width * height) * ImageFormat.getBitsPerPixel(ImageFormat.NV21) / 8;
+        Logger.e(TAG, "open callback buffer size=" + size);
+        return new byte[size];
     }
 }

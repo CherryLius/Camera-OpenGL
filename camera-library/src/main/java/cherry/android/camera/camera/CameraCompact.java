@@ -51,7 +51,6 @@ public class CameraCompact {
     public void start(@CameraId int cameraId) {
         try {
             mCameraId = cameraId;
-            startBackgroundThread();
             mCamera.openCamera(cameraId);
         } catch (Exception e) {
             e.printStackTrace();
@@ -62,7 +61,6 @@ public class CameraCompact {
     public void stop() {
         mCamera.stopPreview();
         mCamera.closeCamera();
-        stopBackgroundThread();
     }
 
     public void startPreview() {
@@ -93,22 +91,4 @@ public class CameraCompact {
         return mCamera.getSupportPreviewSizes();
     }
 
-    private void startBackgroundThread() {
-        mBackgroundThread = new HandlerThread("Camera");
-        mBackgroundThread.start();
-        mBackgroundHandler = new Handler(mBackgroundThread.getLooper());
-    }
-
-    private void stopBackgroundThread() {
-        if (mBackgroundThread != null) {
-            mBackgroundHandler.removeCallbacksAndMessages(null);
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR2) {
-                mBackgroundThread.quitSafely();
-            } else {
-                mBackgroundThread.quit();
-            }
-            mBackgroundThread = null;
-            mBackgroundHandler = null;
-        }
-    }
 }

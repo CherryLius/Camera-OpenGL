@@ -8,10 +8,14 @@ import android.support.annotation.NonNull;
 import android.support.v4.app.ActivityCompat;
 import android.support.v4.content.ContextCompat;
 import android.support.v7.app.AppCompatActivity;
+import android.view.View;
 
+import cherry.android.camera.CaptureCallback;
+import cherry.android.camera.ImageManager;
+import cherry.android.camera.body.CaptureBody;
 import cherry.android.camera.renderer.CaptureRenderer;
 
-public class MainActivity extends AppCompatActivity {
+public class MainActivity extends AppCompatActivity implements View.OnClickListener {
 
     GLSurfaceView glSurfaceView;
     CaptureRenderer captureRenderer;
@@ -23,10 +27,11 @@ public class MainActivity extends AppCompatActivity {
         setContentView(R.layout.activity_main);
         glSurfaceView = findViewById(R.id.gl_surface);
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
-            captureRenderer = new CaptureRenderer(glSurfaceView);
+            initCapture();
         } else {
             ActivityCompat.requestPermissions(this, new String[]{Manifest.permission.CAMERA}, 100);
         }
+        findViewById(R.id.btn_capture).setOnClickListener(this);
     }
 
     @Override
@@ -57,7 +62,36 @@ public class MainActivity extends AppCompatActivity {
     public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         if (requestCode == 100 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-            captureRenderer = new CaptureRenderer(glSurfaceView);
+            initCapture();
+        }
+    }
+
+    void initCapture() {
+        captureRenderer = new CaptureRenderer(glSurfaceView);
+        captureRenderer.getCameraCompat().setCallback(new CaptureCallback() {
+            @Override
+            public void onCaptured(@NonNull CaptureBody captureBody) {
+                ImageManager.instance().saveImage(MainActivity.this, captureBody, captureRenderer.getCameraCompat().getCamera());
+            }
+
+            @Override
+            public void onBurstComplete() {
+
+            }
+
+            @Override
+            public void onPictureSaved(@NonNull CaptureBody captureBody) {
+
+            }
+        });
+    }
+
+    @Override
+    public void onClick(View v) {
+        switch (v.getId()) {
+            case R.id.btn_capture:
+                captureRenderer.getCameraCompat().capture();
+                break;
         }
     }
 }

@@ -18,7 +18,7 @@ public class BitmapUtil {
         BitmapFactory.Options options = new BitmapFactory.Options();
         options.inJustDecodeBounds = true;
         BitmapFactory.decodeByteArray(bytes, 0, bytes.length, options);
-        Logger.d(TAG, "options: " + options.outWidth + "x" + options.outHeight);
+        CameraLog.d(TAG, "options: " + options.outWidth + "x" + options.outHeight);
 
         DisplayMetrics dm = context.getResources().getDisplayMetrics();
         int targetDensityDpi = dm.densityDpi;
@@ -28,7 +28,7 @@ public class BitmapUtil {
 
         double xScale = options.outWidth / (float) expectW;
         double yScale = options.outHeight / (float) expectH;
-        Logger.d(TAG, "xScale=" + xScale + ",yScale=" + yScale
+        CameraLog.d(TAG, "xScale=" + xScale + ",yScale=" + yScale
                 + ",targetDensity=" + targetDensityDpi);
 
         options.inTargetDensity = targetDensityDpi;
@@ -51,7 +51,7 @@ public class BitmapUtil {
                 inSampleSize *= 2;
             }
         }
-        Logger.i(TAG, "inSampleSize=" + inSampleSize);
+        CameraLog.i(TAG, "inSampleSize=" + inSampleSize);
         return inSampleSize;
     }
 
@@ -59,7 +59,7 @@ public class BitmapUtil {
         MediaScannerConnection.scanFile(context, paths, null, new MediaScannerConnection.OnScanCompletedListener() {
             @Override
             public void onScanCompleted(String path, Uri uri) {
-                Logger.d(TAG, "scan file !!!!!!!!!!!! " + path);
+                CameraLog.d(TAG, "scan file !!!!!!!!!!!! " + path);
             }
         });
     }

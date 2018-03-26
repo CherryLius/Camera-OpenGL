@@ -12,7 +12,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 
-import cherry.android.camera.util.Logger;
+import cherry.android.camera.util.CameraLog;
 
 import static android.opengl.GLES20.GL_CLAMP_TO_EDGE;
 import static android.opengl.GLES20.GL_COMPILE_STATUS;
@@ -74,7 +74,7 @@ public class OpenGLUtils {
         glLinkProgram(iProgramId);
         glGetProgramiv(iProgramId, GL_LINK_STATUS, link, 0);
         if (link[0] <= 0) {
-            Logger.e(TAG, "Link Program Failed.");
+            CameraLog.e(TAG, "Link Program Failed.");
             return 0;
         }
 
@@ -97,7 +97,7 @@ public class OpenGLUtils {
         glCompileShader(iShader);
         glGetShaderiv(iShader, GL_COMPILE_STATUS, compiled, 0);
         if (compiled[0] == 0) {
-            Logger.e(TAG, " Failed : Compilation\n" + glGetShaderInfoLog(iShader));
+            CameraLog.e(TAG, " Failed : Compilation\n" + glGetShaderInfoLog(iShader));
             return 0;
         }
         return iShader;

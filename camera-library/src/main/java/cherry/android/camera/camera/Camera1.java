@@ -20,8 +20,8 @@ import cherry.android.camera.SizeSupplier;
 import cherry.android.camera.annotations.CameraId;
 import cherry.android.camera.annotations.CameraState;
 import cherry.android.camera.body.Camera1CaptureBody;
+import cherry.android.camera.util.CameraLog;
 import cherry.android.camera.util.CameraUtil;
-import cherry.android.camera.util.Logger;
 
 import static cherry.android.camera.annotations.CameraState.STATE_CAPTURE_BURST;
 import static cherry.android.camera.annotations.CameraState.STATE_CAPTURE_ONCE;
@@ -59,7 +59,7 @@ public class Camera1 extends AbstractCamera<Camera> implements Camera.PreviewCal
     @Override
     public void setPreviewSize(int width, int height) {
         if (mDefaultPreviewWidth == width && mDefaultPreviewHeight == height) {
-            Logger.i(TAG, "same preview size. skip " + width + "x" + height);
+            CameraLog.i(TAG, "same preview size. skip " + width + "x" + height);
             return;
         }
         mDefaultPreviewWidth = width;
@@ -83,18 +83,14 @@ public class Camera1 extends AbstractCamera<Camera> implements Camera.PreviewCal
     @Override
     public void openCamera(@CameraId int cameraId) throws Exception {
         super.openCamera(cameraId);
-        if (cameraId == CameraId.CAMERA_FRONT) {
-            mRealCameraId = Camera.CameraInfo.CAMERA_FACING_FRONT;
-        } else {
-            mRealCameraId = Camera.CameraInfo.CAMERA_FACING_BACK;
-        }
+        mRealCameraId = checkCameraId(cameraId);
 
         mCameraHandler.post(new Runnable() {
             @Override
             public void run() {
                 try {
                     mCameraLock.lock();
-                    Logger.i(TAG, "openCamera");
+                    CameraLog.i(TAG, "openCamera");
                     mCameraDriver = Camera.open(mRealCameraId);
 
                     setupCameraParams();
@@ -122,7 +118,7 @@ public class Camera1 extends AbstractCamera<Camera> implements Camera.PreviewCal
         super.closeCamera();
         if (mCameraDriver != null) {
             mCameraLock.lock();
-            Logger.i(TAG, "releaseCamera");
+            CameraLog.i(TAG, "releaseCamera");
             mCameraDriver.setPreviewCallbackWithBuffer(null);
             mCameraDriver.setPreviewCallback(null);
             mCameraDriver.release();
@@ -158,7 +154,7 @@ public class Camera1 extends AbstractCamera<Camera> implements Camera.PreviewCal
                     @Override
                     public void onPictureTaken(byte[] bytes, Camera camera) {
                         stopPreview();
-                        Logger.e(TAG, Thread.currentThread().getName());
+                        CameraLog.e(TAG, Thread.currentThread().getName());
                         int index = mContinuous++;
                         ImageManager.instance().execute(new Camera1CaptureBody(mContext, index, bytes, Camera1.this), Camera1.this);
                         if (index < count - 1) {
@@ -204,15 +200,10 @@ public class Camera1 extends AbstractCamera<Camera> implements Camera.PreviewCal
     @Override
     public int getOrientation() {
         Camera.getCameraInfo(mRealCameraId, mCameraInfo);
-        Logger.e(TAG, "orientation=" + mCameraInfo.orientation);
-        Logger.d(TAG, "getDisplayRotation=" + CameraUtil.getDisplayRotation(mContext));
-        Logger.v(TAG, "getDisplayOrientation=" + getDisplayOrientation(CameraUtil.getDisplayRotation(mContext), mRealCameraId));
+        CameraLog.e(TAG, "orientation=" + mCameraInfo.orientation);
+        CameraLog.d(TAG, "getDisplayRotation=" + CameraUtil.getDisplayRotation(mContext));
+        CameraLog.v(TAG, "getDisplayOrientation=" + getDisplayOrientation(CameraUtil.getDisplayRotation(mContext), mRealCameraId));
         return (mCameraInfo.orientation - CameraUtil.getDisplayRotation(mContext) + 360) % 360;
-    }
-
-    @Override
-    public int getState() {
-        return mState;
     }
 
     private static int getDisplayOrientation(int degrees, int cameraId) {
@@ -279,7 +270,7 @@ public class Camera1 extends AbstractCamera<Camera> implements Camera.PreviewCal
         double screenRatio = CameraUtil.findFullscreenRatio(mContext, supportPictureSizes, mSupplier);
 
         for (Camera.Size size : mParameters.getSupportedPictureSizes()) {
-            Logger.e(TAG, "support picture size=" + size.width + "x" + size.height);
+            CameraLog.e(TAG, "support picture size=" + size.width + "x" + size.height);
         }
         //预览尺寸
         resolvePreviewSize();
@@ -292,7 +283,7 @@ public class Camera1 extends AbstractCamera<Camera> implements Camera.PreviewCal
     private void resolvePreviewSize() {
         final Camera.Size[] supportPreviewSizes = cameraSizesToArray(mParameters.getSupportedPreviewSizes());
         for (Camera.Size size : mParameters.getSupportedPreviewSizes()) {
-            Logger.e(TAG, "support preview size=" + size.width + "x" + size.height);
+            CameraLog.e(TAG, "support preview size=" + size.width + "x" + size.height);
         }
 
         Camera.Size previewSize;
@@ -344,7 +335,18 @@ public class Camera1 extends AbstractCamera<Camera> implements Camera.PreviewCal
 
     private static byte[] calculateBuffer(int width, int height) {
         final int size = (width * height) * ImageFormat.getBitsPerPixel(ImageFormat.NV21) / 8;
-        Logger.e(TAG, "open callback buffer size=" + size);
+        CameraLog.e(TAG, "open callback buffer size=" + size);
         return new byte[size];
+    }
+
+    private static int checkCameraId(@CameraId int cameraId) {
+        switch (cameraId) {
+            case CameraId.CAMERA_FRONT:
+                return Camera.CameraInfo.CAMERA_FACING_FRONT;
+            case CameraId.CAMERA_BACK:
+                return Camera.CameraInfo.CAMERA_FACING_BACK;
+            default:
+                throw new IllegalStateException("cameraId is Unsupported. cameraId=" + cameraId);
+        }
     }
 }

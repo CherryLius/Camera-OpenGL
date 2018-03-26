@@ -1,5 +1,6 @@
 package cherry.android.camera;
 
+import android.annotation.TargetApi;
 import android.content.Context;
 import android.os.Handler;
 import android.os.HandlerThread;
@@ -14,7 +15,7 @@ import cherry.android.camera.body.CaptureBody;
 import cherry.android.camera.camera.ICamera;
 import cherry.android.camera.provider.DefaultProvider;
 import cherry.android.camera.provider.IProvider;
-import cherry.android.camera.util.Logger;
+import cherry.android.camera.util.CameraLog;
 
 import static cherry.android.camera.util.BitmapUtil.fileScan;
 
@@ -70,10 +71,11 @@ public class ImageManager {
             @Override
             public void run() {
                 if (provider == null) {
-                    Logger.e(TAG, "No Provider to get filename.");
+                    CameraLog.e(TAG, "No Provider to get filename.");
                     return;
                 }
                 File file = new File(provider.filename());
+                CameraLog.i(TAG, "file=" + file);
                 try (FileOutputStream outputStream = new FileOutputStream(file)) {
                     outputStream.write(captureBody.getBytes());
                     outputStream.flush();
@@ -84,10 +86,10 @@ public class ImageManager {
                     }
                 } catch (FileNotFoundException e) {
                     e.printStackTrace();
-                    Logger.e(TAG, "FileNotFound", e);
+                    CameraLog.e(TAG, "FileNotFound", e);
                 } catch (IOException e) {
                     e.printStackTrace();
-                    Logger.e(TAG, "IOException", e);
+                    CameraLog.e(TAG, "IOException", e);
                 }
             }
         });

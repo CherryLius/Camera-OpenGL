@@ -1,8 +1,10 @@
 package cherry.android.camera.body;
 
+import android.annotation.TargetApi;
 import android.content.Context;
 import android.graphics.Bitmap;
 import android.media.Image;
+import android.os.Build;
 import android.support.annotation.NonNull;
 
 import java.nio.ByteBuffer;
@@ -12,7 +14,7 @@ import static cherry.android.camera.util.BitmapUtil.decodeBitmap;
 /**
  * Created by ROOT on 2017/8/9.
  */
-
+@TargetApi(Build.VERSION_CODES.LOLLIPOP)
 public class Camera2CaptureBody implements CaptureBody {
     private Context context;
     private Image image;

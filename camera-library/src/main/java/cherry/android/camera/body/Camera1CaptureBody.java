@@ -40,7 +40,7 @@ public class Camera1CaptureBody implements CaptureBody {
 
     @Override
     public void transform() {
-        if (iCamera.isFrontCamera()) {
+        if (/*iCamera.isFrontCamera()*/false) {
             bitmap = rotateBitmap(BitmapFactory.decodeByteArray(this.bytes, 0, this.bytes.length));
             ByteArrayOutputStream bos = new ByteArrayOutputStream();
             bitmap.compress(Bitmap.CompressFormat.JPEG, 100, bos);

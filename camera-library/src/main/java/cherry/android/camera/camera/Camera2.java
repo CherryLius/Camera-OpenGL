@@ -9,12 +9,15 @@ import android.hardware.camera2.CameraCaptureSession;
 import android.hardware.camera2.CameraCharacteristics;
 import android.hardware.camera2.CameraDevice;
 import android.hardware.camera2.CameraManager;
+import android.hardware.camera2.CameraMetadata;
 import android.hardware.camera2.CaptureRequest;
+import android.hardware.camera2.CaptureResult;
 import android.hardware.camera2.TotalCaptureResult;
 import android.hardware.camera2.params.StreamConfigurationMap;
 import android.media.Image;
 import android.media.ImageReader;
 import android.os.Build;
+import android.support.annotation.IntDef;
 import android.support.annotation.NonNull;
 import android.support.annotation.RequiresApi;
 import android.support.annotation.RequiresPermission;
@@ -27,21 +30,18 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.Semaphore;
+import java.util.concurrent.TimeUnit;
 
 import cherry.android.camera.CaptureCallback;
 import cherry.android.camera.ImageManager;
 import cherry.android.camera.PreviewCallback;
 import cherry.android.camera.SizeSupplier;
 import cherry.android.camera.annotations.CameraId;
-import cherry.android.camera.annotations.CameraState;
 import cherry.android.camera.body.Camera2CaptureBody;
 import cherry.android.camera.body.CaptureBody;
+import cherry.android.camera.util.CameraLog;
 import cherry.android.camera.util.CameraUtil;
-import cherry.android.camera.util.Logger;
-
-import static cherry.android.camera.annotations.CameraState.STATE_CAPTURE_BURST;
-import static cherry.android.camera.annotations.CameraState.STATE_CAPTURE_ONCE;
-import static cherry.android.camera.annotations.CameraState.STATE_PREVIEW;
 
 /**
  * Created by Administrator on 2017/4/6.
@@ -62,13 +62,31 @@ import static cherry.android.camera.annotations.CameraState.STATE_PREVIEW;
         ORIENTATIONS.append(Surface.ROTATION_270, 180);
     }
 
+    @IntDef({
+            StateInternal.PREVIEW,
+            StateInternal.WAITING_LOCK,
+            StateInternal.WAITING_PRECAPTURE,
+            StateInternal.WAITING_NON_PRECAPTURE,
+            StateInternal.PICTURE_TAKEN,
+    })
+    private @interface StateInternal {
+        int PREVIEW = 0;
+        int WAITING_LOCK = 1;
+        int WAITING_PRECAPTURE = 2;
+        int WAITING_NON_PRECAPTURE = 3;
+        int PICTURE_TAKEN = 4;
+    }
 
+    /**
+     * A {@link Semaphore} to prevent the app from exiting before closing the camera.
+     */
+    private Semaphore mCameraLock = new Semaphore(1);
     private CameraManager mCameraManager;
     private ImageReader mPictureImageReader;
     private ImageReader mPreviewImageReader;
     private CameraCaptureSession mCaptureSession;
+    private CaptureRequest.Builder mPreviewRequestBuilder;
     private CaptureRequest mPreviewRequest;
-    private CaptureRequest mCaptureRequest;
 
     private CaptureCallback mCallback;
     private int mImageFormat = ImageFormat.YUV_420_888;
@@ -76,9 +94,73 @@ import static cherry.android.camera.annotations.CameraState.STATE_PREVIEW;
 
     private PreviewCallback mPreviewCallback;
 
-    @CameraState
-    private int mState = STATE_PREVIEW;
+    @StateInternal
+    private int mState = StateInternal.PREVIEW;
     private int mContinuous = -1;
+
+    /**
+     * A {@link CameraCaptureSession.CaptureCallback} that handles events related to JPEG capture.
+     */
+    private final CameraCaptureSession.CaptureCallback mCaptureCallback = new CameraCaptureSession.CaptureCallback() {
+        @Override
+        public void onCaptureProgressed(@NonNull CameraCaptureSession session, @NonNull CaptureRequest request, @NonNull CaptureResult partialResult) {
+            super.onCaptureProgressed(session, request, partialResult);
+            process(partialResult);
+        }
+
+        @Override
+        public void onCaptureCompleted(@NonNull CameraCaptureSession session, @NonNull CaptureRequest request, @NonNull TotalCaptureResult result) {
+            super.onCaptureCompleted(session, request, result);
+            process(result);
+        }
+
+        private void process(CaptureResult result) {
+            switch (mState) {
+                case StateInternal.WAITING_LOCK: {
+                    Integer afState = result.get(CaptureResult.CONTROL_AF_STATE);
+                    if (afState == null) {
+                        captureStillPicture();
+                    } else if (CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED == afState
+                            || CaptureResult.CONTROL_AF_STATE_NOT_FOCUSED_LOCKED == afState) {
+                        // CONTROL_AE_STATE can be null on some devices
+                        Integer aeState = result.get(CaptureResult.CONTROL_AE_STATE);
+                        if (aeState == null
+                                || aeState == CaptureResult.CONTROL_AE_STATE_CONVERGED) {
+                            mState = StateInternal.PICTURE_TAKEN;
+                            captureStillPicture();
+                        } else {
+                            runPrecaptureSequence();
+                        }
+                    }
+                    break;
+                }
+                case StateInternal.WAITING_PRECAPTURE: {
+                    // CONTROL_AE_STATE can be null on some devices
+                    Integer aeState = result.get(CaptureResult.CONTROL_AE_STATE);
+                    if (aeState == null
+                            || aeState == CaptureResult.CONTROL_AE_STATE_PRECAPTURE
+                            || aeState == CaptureResult.CONTROL_AE_STATE_FLASH_REQUIRED) {
+                        mState = StateInternal.WAITING_NON_PRECAPTURE;
+                    }
+                    break;
+                }
+                case StateInternal.WAITING_NON_PRECAPTURE: {
+                    // CONTROL_AE_STATE can be null on some devices
+                    Integer aeState = result.get(CaptureResult.CONTROL_AE_STATE);
+                    if (aeState == null
+                            || aeState != CaptureResult.CONTROL_AE_STATE_PRECAPTURE) {
+                        mState = StateInternal.PICTURE_TAKEN;
+                        captureStillPicture();
+                    }
+                    break;
+                }
+                case StateInternal.PREVIEW:
+                    // We have nothing to do when the camera preview is working normally.
+                default:
+                    break;
+            }
+        }
+    };
 
     public Camera2(@NonNull Context context, @NonNull SurfaceTexture texture) {
         super(context, texture);
@@ -103,11 +185,7 @@ import static cherry.android.camera.annotations.CameraState.STATE_PREVIEW;
     public void openCamera(@CameraId int cameraId) throws Exception {
         super.openCamera(cameraId);
         //0为后 1为前
-        if (cameraId == CameraId.CAMERA_FRONT) {
-            mRealCameraId = CameraCharacteristics.LENS_FACING_BACK;
-        } else {
-            mRealCameraId = CameraCharacteristics.LENS_FACING_FRONT;
-        }
+        mRealCameraId = checkCameraId(cameraId);
         //ImageReader的Format由ImageFormat.JPEG->ImageFormat.YUV_420_888
         //连拍速度快
         StreamConfigurationMap map = getCharacteristics().get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
@@ -115,19 +193,24 @@ import static cherry.android.camera.annotations.CameraState.STATE_PREVIEW;
 
         double screenRatio = CameraUtil.findFullscreenRatio(mContext, sizes, mSupplier);
         Size picSize = CameraUtil.getOptimalPictureSize(sizes, screenRatio, mSupplier);
-        Logger.i(TAG, "picture Size: " + picSize.getWidth() + "x" + picSize.getHeight());
-        mPictureImageReader = ImageReader.newInstance(picSize.getWidth(), picSize.getHeight(), mImageFormat, 1);
+        CameraLog.i(TAG, "picture Size: " + picSize.getWidth() + "x" + picSize.getHeight());
+
+        mPictureImageReader = ImageReader.newInstance(picSize.getWidth(), picSize.getHeight(), mImageFormat, 2);
         mPictureImageReader.setOnImageAvailableListener(this, mCameraHandler);
 
         resolvePreviewSize();
-        Logger.e(TAG, "previewSize: " + mPreviewWidth + "x" + mPreviewHeight);
-        this.mSurfaceTexture.setDefaultBufferSize(mPreviewWidth, mPreviewHeight);
+        CameraLog.e(TAG, "previewSize: " + mPreviewWidth + "x" + mPreviewHeight);
+        mSurfaceTexture.setDefaultBufferSize(mPreviewWidth, mPreviewHeight);
         mPreviewImageReader = ImageReader.newInstance(mPreviewWidth, mPreviewHeight, mImageFormat, 2);
         mPreviewImageReader.setOnImageAvailableListener(this, mCameraHandler);
 
-        mCameraManager.openCamera(mRealCameraId + "", new CameraDevice.StateCallback() {
+        if (!mCameraLock.tryAcquire(2500, TimeUnit.MILLISECONDS)) {
+            throw new RuntimeException("Time out waiting to lock camera opening.");
+        }
+        mCameraManager.openCamera(String.valueOf(mRealCameraId), new CameraDevice.StateCallback() {
             @Override
             public void onOpened(@NonNull CameraDevice camera) {
+                mCameraLock.release();
                 mCameraDriver = camera;
                 startPreview();
             }
@@ -140,7 +223,7 @@ import static cherry.android.camera.annotations.CameraState.STATE_PREVIEW;
             @Override
             public void onError(@NonNull CameraDevice camera, int error) {
                 closeCamera();
-                Logger.e(TAG, "open Camera err: " + error);
+                CameraLog.e(TAG, "open Camera err: " + error);
             }
         }, mCameraHandler);
     }
@@ -148,55 +231,44 @@ import static cherry.android.camera.annotations.CameraState.STATE_PREVIEW;
     @Override
     public void closeCamera() {
         super.closeCamera();
-        if (mCaptureSession != null) {
-            mCaptureSession.close();
-            mCaptureSession = null;
-        }
-        if (mCameraDriver != null) {
-            mCameraDriver.close();
-            mCameraDriver = null;
-        }
-        if (mPreviewImageReader != null) {
-            mPreviewImageReader.close();
-            mPreviewImageReader = null;
-        }
-        if (mPictureImageReader != null) {
-            mPictureImageReader.close();
-            mPictureImageReader = null;
+        try {
+            mCameraLock.acquire();
+            if (mCaptureSession != null) {
+                mCaptureSession.close();
+                mCaptureSession = null;
+            }
+            if (mCameraDriver != null) {
+                mCameraDriver.close();
+                mCameraDriver = null;
+            }
+            if (mPreviewImageReader != null) {
+                mPreviewImageReader.close();
+                mPreviewImageReader = null;
+            }
+            if (mPictureImageReader != null) {
+                mPictureImageReader.close();
+                mPictureImageReader = null;
+            }
+        } catch (InterruptedException e) {
+            throw new RuntimeException("Interrupted while trying to lock camera closing.", e);
+        } finally {
+            mCameraLock.release();
         }
     }
 
     @Override
     public void capture() throws Exception {
         if (mCameraDriver == null || mCaptureSession == null) {
-            Logger.e(TAG, "CameraDevice is null");
+            CameraLog.e(TAG, "CameraDevice is null");
             return;
         }
-        mState = STATE_CAPTURE_ONCE;
-        if (mCaptureRequest != null) {
-            mCaptureSession.capture(mCaptureRequest, new CameraCaptureSession.CaptureCallback() {
-                @Override
-                public void onCaptureCompleted(@NonNull CameraCaptureSession session, @NonNull CaptureRequest request, @NonNull TotalCaptureResult result) {
-                    super.onCaptureCompleted(session, request, result);
-                }
-            }, mCameraHandler);
-            return;
-        }
-        mCaptureRequest = createCaptureRequest();
-        mCaptureSession.capture(mCaptureRequest, new CameraCaptureSession.CaptureCallback() {
-
-            @Override
-            public void onCaptureCompleted(@NonNull CameraCaptureSession session, @NonNull CaptureRequest request, @NonNull TotalCaptureResult result) {
-                super.onCaptureCompleted(session, request, result);
-                Logger.e(TAG, "onCaptureCompleted");
-            }
-        }, mCameraHandler);
+        lockFocus();
     }
 
     @Override
     public void captureBurst() {
         if (mCameraDriver == null || mCaptureSession == null) {
-            Logger.e(TAG, "CameraDevice is null");
+            CameraLog.e(TAG, "CameraDevice is null");
             return;
         }
         final int total = 10;
@@ -206,7 +278,7 @@ import static cherry.android.camera.annotations.CameraState.STATE_PREVIEW;
             captureList.add(createCaptureRequest());
         }
         try {
-            mState = STATE_CAPTURE_BURST;
+//            mState = STATE_CAPTURE_BURST;
             mCaptureSession.stopRepeating();
             mCaptureSession.captureBurst(captureList, new CameraCaptureSession.CaptureCallback() {
 
@@ -214,7 +286,7 @@ import static cherry.android.camera.annotations.CameraState.STATE_PREVIEW;
                 public void onCaptureCompleted(@NonNull CameraCaptureSession session, @NonNull CaptureRequest request, @NonNull TotalCaptureResult result) {
                     super.onCaptureCompleted(session, request, result);
                     int count = ++mContinuous;
-                    Logger.e(TAG, "count=" + count);
+                    CameraLog.e(TAG, "count=" + count);
                     if (count >= total) {
                         if (mCallback != null) {
                             mCallback.onBurstComplete();
@@ -226,22 +298,26 @@ import static cherry.android.camera.annotations.CameraState.STATE_PREVIEW;
             }, mCameraHandler);
         } catch (CameraAccessException e) {
             e.printStackTrace();
-            Logger.e(TAG, "CameraAccessException", e);
+            CameraLog.e(TAG, "CameraAccessException", e);
         }
     }
 
     private CaptureRequest createCaptureRequest() {
+        // This is the CaptureRequest.Builder that we use to take a picture.
         try {
             CaptureRequest.Builder requestBuilder = mCameraDriver.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE);
             requestBuilder.addTarget(mPictureImageReader.getSurface());
+            // Use the same AE and AF modes as the preview.
             //自动对焦
             requestBuilder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE);
             //闪光灯
-            requestBuilder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON_AUTO_FLASH);
-            //rotation
+            if (isFlashSupported()) {
+                requestBuilder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON_AUTO_FLASH);
+            }
+            // Orientation
             WindowManager wm = CameraUtil.getSystemService(mContext, Context.WINDOW_SERVICE);
             int rotation = wm.getDefaultDisplay().getRotation();
-            Logger.e(TAG, "display rotation=" + rotation);
+            CameraLog.e(TAG, "display rotation=" + rotation);
             requestBuilder.set(CaptureRequest.JPEG_ORIENTATION, getOrientation(rotation));
 
             return requestBuilder.build();
@@ -253,43 +329,50 @@ import static cherry.android.camera.annotations.CameraState.STATE_PREVIEW;
     @Override
     public void startPreview() {
         try {
-            Logger.i(TAG, "startPreview");
-            mState = STATE_PREVIEW;
+            CameraLog.i(TAG, "startPreview");
+            mState = StateInternal.PREVIEW;
             if (mCaptureSession != null && mPreviewRequest != null) {
-                mCaptureSession.setRepeatingRequest(mPreviewRequest, null, mCameraHandler);
+                mCaptureSession.setRepeatingRequest(mPreviewRequest, mCaptureCallback, mCameraHandler);
                 return;
             }
-            final CaptureRequest.Builder requestBuilder = mCameraDriver.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
-            final Surface irSurface = mPreviewImageReader.getSurface();
-            requestBuilder.addTarget(irSurface);
 
+            mPreviewRequestBuilder = mCameraDriver.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
+            /*glSurface*/
             final Surface glSurface = new Surface(mSurfaceTexture);
-            requestBuilder.addTarget(glSurface);
-            mCameraDriver.createCaptureSession(Arrays.asList(glSurface, irSurface), new CameraCaptureSession.StateCallback() {
-                @Override
-                public void onConfigured(@NonNull CameraCaptureSession session) {
-                    if (mCameraDriver == null) {
-                        Logger.e(TAG, "CameraDevice is null");
-                        return;
-                    }
-                    mCaptureSession = session;
-                    try {
-                        //自动对焦
-                        requestBuilder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE);
-                        //闪光灯
-                        requestBuilder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON_AUTO_FLASH);
-                        mPreviewRequest = requestBuilder.build();
-                        mCaptureSession.setRepeatingRequest(mPreviewRequest, null, mCameraHandler);
-                    } catch (CameraAccessException e) {
-                        e.printStackTrace();
-                    }
-                }
+            mPreviewRequestBuilder.addTarget(glSurface);
 
-                @Override
-                public void onConfigureFailed(@NonNull CameraCaptureSession session) {
-                    Logger.i(TAG, "configure camera failed.");
-                }
-            }, mCameraHandler);
+            /*preview Surface*/
+            final Surface irSurface = mPreviewImageReader.getSurface();
+            mPreviewRequestBuilder.addTarget(irSurface);
+
+            mCameraDriver.createCaptureSession(Arrays.asList(glSurface, irSurface, mPictureImageReader.getSurface()),
+                    new CameraCaptureSession.StateCallback() {
+                        @Override
+                        public void onConfigured(@NonNull CameraCaptureSession session) {
+                            if (mCameraDriver == null) {
+                                CameraLog.e(TAG, "CameraDevice is null");
+                                return;
+                            }
+                            mCaptureSession = session;
+                            try {
+                                //自动对焦
+                                mPreviewRequestBuilder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE);
+                                //闪光灯
+                                if (isFlashSupported()) {
+                                    mPreviewRequestBuilder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON_AUTO_FLASH);
+                                }
+                                mPreviewRequest = mPreviewRequestBuilder.build();
+                                mCaptureSession.setRepeatingRequest(mPreviewRequest, mCaptureCallback, mCameraHandler);
+                            } catch (CameraAccessException e) {
+                                e.printStackTrace();
+                            }
+                        }
+
+                        @Override
+                        public void onConfigureFailed(@NonNull CameraCaptureSession session) {
+                            CameraLog.i(TAG, "configure camera failed.");
+                        }
+                    }, mCameraHandler);
         } catch (CameraAccessException e) {
             e.printStackTrace();
         }
@@ -298,7 +381,7 @@ import static cherry.android.camera.annotations.CameraState.STATE_PREVIEW;
     @Override
     public void stopPreview() {
         if (mCaptureSession == null) {
-            Logger.i(TAG, "stop preview failure, no capture session");
+            CameraLog.i(TAG, "stop preview failure, no capture session");
             return;
         }
         try {
@@ -308,17 +391,90 @@ import static cherry.android.camera.annotations.CameraState.STATE_PREVIEW;
         }
     }
 
-    @Override
-    public int getOrientation() {
-        Logger.i(TAG, "getSensorOrientation=%d", getSensorOrientation());
-        Logger.d(TAG, "getDisplayRotation=%d", CameraUtil.getDisplayRotation(mContext));
-        Logger.i(TAG, "getOrientation ret=%d", (getSensorOrientation() + 270 - CameraUtil.getDisplayRotation(mContext)) % 360);
-        return (getSensorOrientation() + 270 - CameraUtil.getDisplayRotation(mContext)) % 360;
+    /**
+     * Lock the focus as the first step for a still image capture.
+     */
+    private void lockFocus() {
+        try {
+            // This is how to tell the camera to lock focus.
+            mPreviewRequestBuilder.set(CaptureRequest.CONTROL_AF_TRIGGER, CameraMetadata.CONTROL_AF_TRIGGER_START);
+            // Tell #mCaptureCallback to wait for the lock.
+            mState = StateInternal.WAITING_LOCK;
+            mCaptureSession.capture(mPreviewRequestBuilder.build(), mCaptureCallback, mCameraHandler);
+        } catch (CameraAccessException e) {
+            e.printStackTrace();
+        }
+    }
+
+    /**
+     * Capture a still picture. This method should be called when we get a response in
+     * {@link #mCaptureCallback} from both {@link #lockFocus()}.
+     */
+    private void captureStillPicture() {
+//        mState = STATE_CAPTURE_ONCE;
+        final CaptureRequest captureRequest = createCaptureRequest();
+        try {
+            mCaptureSession.stopRepeating();
+            mCaptureSession.capture(captureRequest, new CameraCaptureSession.CaptureCallback() {
+
+                @Override
+                public void onCaptureCompleted(@NonNull CameraCaptureSession session, @NonNull CaptureRequest request, @NonNull TotalCaptureResult result) {
+                    super.onCaptureCompleted(session, request, result);
+                    CameraLog.e(TAG, "onCaptureCompleted");
+                    unlockFocus();
+                }
+            }, mCameraHandler);
+        } catch (CameraAccessException e) {
+            CameraLog.e(TAG, "captureStillPicture error", e);
+        }
+    }
+
+    /**
+     * Run the precapture sequence for capturing a still image. This method should be called when
+     * we get a response in {@link #mCaptureCallback} from {@link #lockFocus()}.
+     */
+    private void runPrecaptureSequence() {
+        try {
+            // This is how to tell the camera to trigger.
+            mPreviewRequestBuilder.set(CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER,
+                    CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER_START);
+            // Tell #mCaptureCallback to wait for the precapture sequence to be set.
+            mState = StateInternal.WAITING_PRECAPTURE;
+            mCaptureSession.capture(mPreviewRequestBuilder.build(), mCaptureCallback, mCameraHandler);
+        } catch (CameraAccessException e) {
+            e.printStackTrace();
+        }
+    }
+
+    /**
+     * Unlock the focus. This method should be called when still image capture sequence is
+     * finished.
+     */
+    private void unlockFocus() {
+        try {
+            // Reset the auto-focus trigger
+            mPreviewRequestBuilder.set(CaptureRequest.CONTROL_AF_TRIGGER,
+                    CameraMetadata.CONTROL_AF_TRIGGER_CANCEL);
+            if (isFlashSupported()) {
+                mPreviewRequestBuilder.set(CaptureRequest.CONTROL_AE_MODE,
+                        CaptureRequest.CONTROL_AE_MODE_ON_AUTO_FLASH);
+            }
+            mCaptureSession.capture(mPreviewRequestBuilder.build(), mCaptureCallback, mCameraHandler);
+            // After this, the camera will go back to the normal state of preview.
+            mState = StateInternal.PREVIEW;
+            mCaptureSession.setRepeatingRequest(mPreviewRequest, mCaptureCallback, mCameraHandler);
+
+        } catch (CameraAccessException e) {
+            e.printStackTrace();
+        }
     }
 
     @Override
-    public int getState() {
-        return mState;
+    public int getOrientation() {
+        CameraLog.i(TAG, "getSensorOrientation=%d", getSensorOrientation());
+        CameraLog.d(TAG, "getDisplayRotation=%d", CameraUtil.getDisplayRotation(mContext));
+        CameraLog.i(TAG, "getOrientation ret=%d", (getSensorOrientation() + 270 - CameraUtil.getDisplayRotation(mContext)) % 360);
+        return (getSensorOrientation() + 270 - CameraUtil.getDisplayRotation(mContext)) % 360;
     }
 
     @Override
@@ -361,13 +517,11 @@ import static cherry.android.camera.annotations.CameraState.STATE_PREVIEW;
 
     @Override
     public void onImageAvailable(ImageReader imageReader) {
-//        stopPreview();
         if (imageReader.equals(mPictureImageReader)) {
-            Logger.e(TAG, "continuous=" + mContinuous);
+            CameraLog.e(TAG, "continuous=" + mContinuous);
             CaptureBody captureBody = new Camera2CaptureBody(mContext, mContinuous, imageReader.acquireNextImage());
             ImageManager.instance().execute(captureBody, this);
         } else {
-            Logger.v(TAG, "preview available " + Thread.currentThread().getName());
             Image image = imageReader.acquireLatestImage();
             if (mPreviewCallback != null) {
                 ByteBuffer buffer = image.getPlanes()[0].getBuffer();
@@ -390,7 +544,7 @@ import static cherry.android.camera.annotations.CameraState.STATE_PREVIEW;
         // We have to take that into account and rotate JPEG properly.
         // For devices with orientation of 90, we simply return our mapping from ORIENTATIONS.
         // For devices with orientation of 270, we need to rotate the JPEG 180 degrees.
-        Logger.e(TAG, "getPicOrientation=" + ((ORIENTATIONS.get(rotation) + getSensorOrientation() + 270) % 360));
+        CameraLog.e(TAG, "getOrientation=" + ((ORIENTATIONS.get(rotation) + getSensorOrientation() + 270) % 360));
         return (ORIENTATIONS.get(rotation) + getSensorOrientation() + 270) % 360;
     }
 
@@ -409,7 +563,7 @@ import static cherry.android.camera.annotations.CameraState.STATE_PREVIEW;
         try {
             String[] cameraIdList = mCameraManager.getCameraIdList();
             for (String cameraId : cameraIdList) {
-                Logger.e(TAG, " cameraId= " + cameraId);
+                CameraLog.e(TAG, " cameraId= " + cameraId);
                 if (!cameraId.equals(mRealCameraId + "")) {
                     continue;
                 }
@@ -417,9 +571,14 @@ import static cherry.android.camera.annotations.CameraState.STATE_PREVIEW;
                 return characteristics;
             }
         } catch (CameraAccessException e) {
-            e.printStackTrace();
+            throw new IllegalArgumentException("Camera Access Exception", e);
         }
         return null;
+    }
+
+    private boolean isFlashSupported() {
+        Boolean available = getCharacteristics().get(CameraCharacteristics.FLASH_INFO_AVAILABLE);
+        return available == null ? false : available;
     }
 
     private void resolvePreviewSize() {
@@ -450,4 +609,15 @@ import static cherry.android.camera.annotations.CameraState.STATE_PREVIEW;
             return size.getHeight();
         }
     };
+
+    private static int checkCameraId(@CameraId int cameraId) {
+        switch (cameraId) {
+            case CameraId.CAMERA_FRONT:
+                return CameraCharacteristics.LENS_FACING_BACK;
+            case CameraId.CAMERA_BACK:
+                return CameraCharacteristics.LENS_FACING_FRONT;
+            default:
+                throw new IllegalStateException("cameraId is Unsupported. cameraId=" + cameraId);
+        }
+    }
 }

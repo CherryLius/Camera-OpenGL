@@ -19,7 +19,7 @@ import cherry.android.camera.filter.YUVFilter;
 import cherry.android.camera.opengl.GLRotation;
 import cherry.android.camera.opengl.OpenGLUtils;
 import cherry.android.camera.opengl.Rotation;
-import cherry.android.camera.util.Logger;
+import cherry.android.camera.util.CameraLog;
 
 /**
  * Created by Administrator on 2017/4/6.
@@ -58,9 +58,9 @@ public class CaptureRenderer implements GLSurfaceView.Renderer, SurfaceTexture.O
         //Camera preview textureId
         mTextureId = OpenGLUtils.getExternalOESTextureId();
         mSurfaceTexture = new SurfaceTexture(mTextureId);
-        mSurfaceTexture.setOnFrameAvailableListener(CaptureRenderer.this);
+        mSurfaceTexture.setOnFrameAvailableListener(this);
 
-        mCameraCompact = new CameraCompact(mContext,mSurfaceTexture);
+        mCameraCompact = new CameraCompact(mContext, mSurfaceTexture);
 
         mGLSurfaceView.setEGLContextClientVersion(2);
         mGLSurfaceView.setRenderer(this);
@@ -69,7 +69,7 @@ public class CaptureRenderer implements GLSurfaceView.Renderer, SurfaceTexture.O
 
     @Override
     public void onSurfaceCreated(GL10 gl, EGLConfig config) {
-        Logger.i(TAG, "onSurfaceCreated");
+        CameraLog.i(TAG, "onSurfaceCreated");
         GLES20.glDisable(GLES20.GL_DITHER);
         GLES20.glClearColor(0, 0, 0, 0);
         GLES20.glEnable(GLES20.GL_CULL_FACE);
@@ -80,7 +80,7 @@ public class CaptureRenderer implements GLSurfaceView.Renderer, SurfaceTexture.O
 
     @Override
     public void onSurfaceChanged(GL10 gl, int width, int height) {
-        Logger.v(TAG, "[onSurfaceChanged] width=" + width + "x" + height);
+        CameraLog.v(TAG, "[onSurfaceChanged] width=" + width + "x" + height);
         GLES20.glViewport(0, 0, width, height);
     }
 
@@ -90,7 +90,7 @@ public class CaptureRenderer implements GLSurfaceView.Renderer, SurfaceTexture.O
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT | GLES20.GL_DEPTH_BUFFER_BIT);
         if (mState == STATE_PICTURE) {
             int textureId = OpenGLUtils.loadTexture(mBitmap, OpenGLUtils.NO_TEXTURE);
-            Logger.e(TAG, "draw picture : " + textureId + ", bm=" + mBitmap);
+            CameraLog.e(TAG, "draw picture : " + textureId + ", bm=" + mBitmap);
             mFilter.render(textureId, null);
         } else if (mState == STATE_CAPTURE) {
             if (mSurfaceTexture != null) {
@@ -106,7 +106,7 @@ public class CaptureRenderer implements GLSurfaceView.Renderer, SurfaceTexture.O
         mGLSurfaceView.onResume();
         mCameraCompact.start(CameraId.CAMERA_BACK);
         boolean flipHorizontal = mCameraCompact.isFrontCamera();
-        Logger.d(TAG, "orientation=" + mCameraCompact.getOrientation());
+        CameraLog.d(TAG, "orientation=" + mCameraCompact.getOrientation());
         adjustPosition(mCameraCompact.getOrientation(), flipHorizontal, !flipHorizontal);
     }
 
@@ -140,7 +140,7 @@ public class CaptureRenderer implements GLSurfaceView.Renderer, SurfaceTexture.O
     }
 
     public void setFilter(final int state) {
-        Logger.i(TAG, "setFilter");
+        CameraLog.i(TAG, "setFilter");
         if (mFilterChangeListener != null && mState != state)
             mFilterChangeListener.onFilterChanged(state);
 
@@ -177,7 +177,7 @@ public class CaptureRenderer implements GLSurfaceView.Renderer, SurfaceTexture.O
 
     private void adjustPosition(int orientation, boolean flipHorizontal, boolean flipVertical) {
         Rotation rotation = Rotation.valueOf(orientation);
-        Logger.i(TAG, "[adjustPosition] orientation=" + orientation + ",rotation=" + rotation);
+        CameraLog.i(TAG, "[adjustPosition] orientation=" + orientation + ",rotation=" + rotation);
         float[] textureCords = GLRotation.getRotation(rotation, flipHorizontal, flipVertical);
         mFilter.updateTexture(textureCords);
     }
@@ -197,7 +197,7 @@ public class CaptureRenderer implements GLSurfaceView.Renderer, SurfaceTexture.O
     }
 
     private void recycle() {
-        Logger.i(TAG, "recycle bitmap");
+        CameraLog.i(TAG, "recycle bitmap");
         if (mBitmap != null) {
             if (!mBitmap.isRecycled())
                 mBitmap.recycle();

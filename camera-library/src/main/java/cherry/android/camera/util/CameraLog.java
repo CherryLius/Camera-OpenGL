@@ -7,14 +7,15 @@ import android.util.Log;
  * Created by Administrator on 2017/5/26.
  */
 
-public final class Logger {
-    private static String sTagPrefix = "Camera.";
-    private static boolean sLoggable = false;
-    private static boolean sTraceStack = false;
+public final class CameraLog {
+    private static String sTagPrefix = "CompactCamera.";
+    private static boolean sLoggable = true;
+    private static boolean sTraceStack = true;
 
     public static void setPrefixTag(String prefix) {
-        if (!TextUtils.isEmpty(prefix))
+        if (!TextUtils.isEmpty(prefix)) {
             sTagPrefix = prefix;
+        }
     }
 
     public static void showLog(boolean show) {
@@ -83,12 +84,16 @@ public final class Logger {
             StringBuilder sb = new StringBuilder();
             String className = stackElements[2].getClassName();
             String methodName = stackElements[2].getMethodName();
+            int lineNumber = stackElements[2].getLineNumber();
             return sb.append("{")
                     .append(className)
                     .append("}")
                     .append(".")
                     .append(methodName)
                     .append("() ")
+                    .append("line: ")
+                    .append(lineNumber)
+                    .append('\n')
                     .append(msg).toString();
         } else {
             return msg;

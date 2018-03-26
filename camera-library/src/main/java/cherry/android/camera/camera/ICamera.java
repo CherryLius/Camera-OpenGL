@@ -29,9 +29,6 @@ public interface ICamera {
 
     int getOrientation();
 
-    @CameraState
-    int getState();
-
     void setCaptureCallback(CaptureCallback cb);
 
     CaptureCallback getCaptureCallback();

@@ -1,46 +1,49 @@
 package cherry.android.camera.camera;
 
-import android.support.annotation.NonNull;
-
-import cherry.android.camera.SizeSupplier;
-
 /**
  * Created by LHEE on 2018/3/18.
  */
 
-public class CameraConfiguration<T> {
+public class CameraConfiguration {
+    private SizeExt previewSizeExt;
+    private SizeExt pictureSizeExt;
 
-    private SizeSupplier<T> previewSizeSupplier;
-    private SizeSupplier<T> pictureSizeSupplier;
-
-    private CameraConfiguration(Builder<T> builder) {
-        this.previewSizeSupplier = builder.previewSizeSupplier;
-        this.pictureSizeSupplier = builder.pictureSizeSupplier;
+    private CameraConfiguration(Builder builder) {
+        this.previewSizeExt = builder.previewSizeExt;
+        this.pictureSizeExt = builder.pictureSizeExt;
     }
 
-    public static <S> Builder<S> builder() {
-        return new Builder<>();
+    public static Builder builder() {
+        return new Builder();
     }
 
-    public static class Builder<T> {
-        private SizeSupplier<T> previewSizeSupplier;
-        private SizeSupplier<T> pictureSizeSupplier;
+    public SizeExt getPreviewSizeExt() {
+        return previewSizeExt;
+    }
+
+    public SizeExt getPictureSizeExt() {
+        return pictureSizeExt;
+    }
+
+    public static class Builder {
+        private SizeExt previewSizeExt;
+        private SizeExt pictureSizeExt;
 
         private Builder() {
 
         }
 
-        public Builder<T> previewSize(@NonNull SizeSupplier<T> previewSizeSupplier) {
-            this.previewSizeSupplier = previewSizeSupplier;
+        public Builder previewOn(int width, int height) {
+            this.previewSizeExt = new SizeExt(width, height);
             return this;
         }
 
-        public Builder<T> pictureSize(@NonNull SizeSupplier<T> pictureSizeSupplier) {
-            this.pictureSizeSupplier = pictureSizeSupplier;
+        public Builder captureOn(int width, int height) {
+            this.pictureSizeExt = new SizeExt(width, height);
             return this;
         }
 
-        public CameraConfiguration<T> build() {
+        public CameraConfiguration build() {
             return new CameraConfiguration(this);
         }
     }

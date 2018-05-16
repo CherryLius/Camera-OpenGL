@@ -14,12 +14,12 @@ import android.support.annotation.NonNull;
 
 public abstract class AbstractCamera<T> implements ICamera {
     protected final Context mContext;
+    protected final SurfaceTexture mSurfaceTexture;
     protected int mRealCameraId;
     protected T mCameraDriver;
-    protected final SurfaceTexture mSurfaceTexture;
-    private HandlerThread mBackgroundThread;
     protected Handler mCameraHandler;
-
+    protected CameraConfiguration mConfiguration;
+    private HandlerThread mBackgroundThread;
 
     public AbstractCamera(@NonNull Context context, @NonNull SurfaceTexture texture) {
         this.mContext = context;
@@ -28,7 +28,7 @@ public abstract class AbstractCamera<T> implements ICamera {
 
     @CallSuper
     @Override
-    public void openCamera(int cameraId) throws Exception {
+    public void openCamera(int cameraId) {
         startBackgroundThread();
     }
 
@@ -62,5 +62,13 @@ public abstract class AbstractCamera<T> implements ICamera {
             mCameraHandler = null;
         }
     }
+
+    public void apply(CameraConfiguration configuration) {
+        final CameraConfiguration oldConfiguration = this.mConfiguration;
+        this.mConfiguration = configuration;
+        onConfigureChanged(oldConfiguration, configuration);
+    }
+
+    protected abstract void onConfigureChanged(CameraConfiguration oldConfig, CameraConfiguration newConfig);
 
 }

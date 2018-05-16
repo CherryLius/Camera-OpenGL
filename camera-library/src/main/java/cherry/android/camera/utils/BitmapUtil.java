@@ -1,4 +1,4 @@
-package cherry.android.camera.util;
+package cherry.android.camera.utils;
 
 import android.content.Context;
 import android.graphics.Bitmap;

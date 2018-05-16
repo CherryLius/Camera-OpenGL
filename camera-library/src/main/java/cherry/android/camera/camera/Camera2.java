@@ -29,6 +29,7 @@ import android.view.WindowManager;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
@@ -36,18 +37,19 @@ import java.util.concurrent.TimeUnit;
 import cherry.android.camera.CaptureCallback;
 import cherry.android.camera.ImageManager;
 import cherry.android.camera.PreviewCallback;
-import cherry.android.camera.SizeSupplier;
 import cherry.android.camera.annotations.CameraId;
 import cherry.android.camera.body.Camera2CaptureBody;
 import cherry.android.camera.body.CaptureBody;
-import cherry.android.camera.util.CameraLog;
-import cherry.android.camera.util.CameraUtil;
+import cherry.android.camera.utils.CameraLog;
+import cherry.android.camera.utils.CameraUtil;
+import cherry.android.camera.utils.InternalCollections;
+import ext.java8.function.Function;
 
 /**
  * Created by Administrator on 2017/4/6.
  */
 @RequiresApi(Build.VERSION_CODES.LOLLIPOP)
-/*public*/ class Camera2 extends AbstractCamera<CameraDevice> implements ICamera, ImageReader.OnImageAvailableListener {
+class Camera2 extends AbstractCamera<CameraDevice> implements ICamera, ImageReader.OnImageAvailableListener {
     private static final String TAG = "Camera2";
 
     /**
@@ -62,21 +64,6 @@ import cherry.android.camera.util.CameraUtil;
         ORIENTATIONS.append(Surface.ROTATION_270, 180);
     }
 
-    @IntDef({
-            StateInternal.PREVIEW,
-            StateInternal.WAITING_LOCK,
-            StateInternal.WAITING_PRECAPTURE,
-            StateInternal.WAITING_NON_PRECAPTURE,
-            StateInternal.PICTURE_TAKEN,
-    })
-    private @interface StateInternal {
-        int PREVIEW = 0;
-        int WAITING_LOCK = 1;
-        int WAITING_PRECAPTURE = 2;
-        int WAITING_NON_PRECAPTURE = 3;
-        int PICTURE_TAKEN = 4;
-    }
-
     /**
      * A {@link Semaphore} to prevent the app from exiting before closing the camera.
      */
@@ -87,17 +74,12 @@ import cherry.android.camera.util.CameraUtil;
     private CameraCaptureSession mCaptureSession;
     private CaptureRequest.Builder mPreviewRequestBuilder;
     private CaptureRequest mPreviewRequest;
-
     private CaptureCallback mCallback;
     private int mImageFormat = ImageFormat.YUV_420_888;
     private int mPreviewWidth, mPreviewHeight;
-
     private PreviewCallback mPreviewCallback;
-
     @StateInternal
     private int mState = StateInternal.PREVIEW;
-    private int mContinuous = -1;
-
     /**
      * A {@link CameraCaptureSession.CaptureCallback} that handles events related to JPEG capture.
      */
@@ -161,71 +143,85 @@ import cherry.android.camera.util.CameraUtil;
             }
         }
     };
+    private int mContinuous = -1;
 
     public Camera2(@NonNull Context context, @NonNull SurfaceTexture texture) {
         super(context, texture);
         mCameraManager = CameraUtil.getSystemService(context, Context.CAMERA_SERVICE);
     }
 
-
-    @Override
-    public void setPreviewSize(int width, int height) {
-        mPreviewWidth = width;
-        mPreviewHeight = height;
-        if (mCameraDriver != null) {
-            stopPreview();
-            resolvePreviewSize();
-            mSurfaceTexture.setDefaultBufferSize(mPreviewWidth, mPreviewHeight);
-            startPreview();
+    private static int checkCameraId(@CameraId int cameraId) {
+        switch (cameraId) {
+            case CameraId.CAMERA_FRONT:
+                return CameraCharacteristics.LENS_FACING_BACK;
+            case CameraId.CAMERA_BACK:
+                return CameraCharacteristics.LENS_FACING_FRONT;
+            default:
+                throw new IllegalStateException("cameraId is Unsupported. cameraId=" + cameraId);
         }
     }
 
+//    @Override
+//    public void setPreviewSize(int width, int height) {
+//        mPreviewWidth = width;
+//        mPreviewHeight = height;
+//        if (mCameraDriver != null) {
+//            stopPreview();
+//            resolvePreviewSize();
+//            mSurfaceTexture.setDefaultBufferSize(mPreviewWidth, mPreviewHeight);
+//            startPreview();
+//        }
+//    }
+
     @RequiresPermission(Manifest.permission.CAMERA)
     @Override
-    public void openCamera(@CameraId int cameraId) throws Exception {
+    public void openCamera(@CameraId int cameraId) {
         super.openCamera(cameraId);
         //0为后 1为前
         mRealCameraId = checkCameraId(cameraId);
         //ImageReader的Format由ImageFormat.JPEG->ImageFormat.YUV_420_888
         //连拍速度快
-        StreamConfigurationMap map = getCharacteristics().get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
-        Size[] sizes = map.getOutputSizes(mImageFormat);
+        List<SizeExt> sizes = getSupportPictureSizes();
 
-        double screenRatio = CameraUtil.findFullscreenRatio(mContext, sizes, mSupplier);
-        Size picSize = CameraUtil.getOptimalPictureSize(sizes, screenRatio, mSupplier);
-        CameraLog.i(TAG, "picture Size: " + picSize.getWidth() + "x" + picSize.getHeight());
+        double screenRatio = CameraUtil.findFullscreenRatio(mContext, sizes);
+        SizeExt picSize = CameraUtil.getOptimalPictureSize(sizes, screenRatio);
+        CameraLog.i(TAG, "picture SizeExt: " + picSize.width() + "x" + picSize.height());
 
-        mPictureImageReader = ImageReader.newInstance(picSize.getWidth(), picSize.getHeight(), mImageFormat, 2);
+        mPictureImageReader = ImageReader.newInstance(picSize.width(), picSize.height(), mImageFormat, 2);
         mPictureImageReader.setOnImageAvailableListener(this, mCameraHandler);
 
         resolvePreviewSize();
-        CameraLog.e(TAG, "previewSize: " + mPreviewWidth + "x" + mPreviewHeight);
+        CameraLog.e(TAG, "previewOn: " + mPreviewWidth + "x" + mPreviewHeight);
         mSurfaceTexture.setDefaultBufferSize(mPreviewWidth, mPreviewHeight);
         mPreviewImageReader = ImageReader.newInstance(mPreviewWidth, mPreviewHeight, mImageFormat, 2);
         mPreviewImageReader.setOnImageAvailableListener(this, mCameraHandler);
 
-        if (!mCameraLock.tryAcquire(2500, TimeUnit.MILLISECONDS)) {
-            throw new RuntimeException("Time out waiting to lock camera opening.");
+        try {
+            if (!mCameraLock.tryAcquire(2500, TimeUnit.MILLISECONDS)) {
+                throw new RuntimeException("Time out waiting to lock camera opening.");
+            }
+            mCameraManager.openCamera(String.valueOf(mRealCameraId), new CameraDevice.StateCallback() {
+                @Override
+                public void onOpened(@NonNull CameraDevice camera) {
+                    mCameraLock.release();
+                    mCameraDriver = camera;
+                    startPreview();
+                }
+
+                @Override
+                public void onDisconnected(@NonNull CameraDevice camera) {
+                    closeCamera();
+                }
+
+                @Override
+                public void onError(@NonNull CameraDevice camera, int error) {
+                    closeCamera();
+                    CameraLog.e(TAG, "open Camera err: " + error);
+                }
+            }, mCameraHandler);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
         }
-        mCameraManager.openCamera(String.valueOf(mRealCameraId), new CameraDevice.StateCallback() {
-            @Override
-            public void onOpened(@NonNull CameraDevice camera) {
-                mCameraLock.release();
-                mCameraDriver = camera;
-                startPreview();
-            }
-
-            @Override
-            public void onDisconnected(@NonNull CameraDevice camera) {
-                closeCamera();
-            }
-
-            @Override
-            public void onError(@NonNull CameraDevice camera, int error) {
-                closeCamera();
-                CameraLog.e(TAG, "open Camera err: " + error);
-            }
-        }, mCameraHandler);
     }
 
     @Override
@@ -257,7 +253,12 @@ import cherry.android.camera.util.CameraUtil;
     }
 
     @Override
-    public void capture() throws Exception {
+    protected void onConfigureChanged(CameraConfiguration oldConfig, CameraConfiguration newConfig) {
+
+    }
+
+    @Override
+    public void capture() {
         if (mCameraDriver == null || mCaptureSession == null) {
             CameraLog.e(TAG, "CameraDevice is null");
             return;
@@ -266,7 +267,7 @@ import cherry.android.camera.util.CameraUtil;
     }
 
     @Override
-    public void captureBurst() {
+    public void continuousCapture() {
         if (mCameraDriver == null || mCaptureSession == null) {
             CameraLog.e(TAG, "CameraDevice is null");
             return;
@@ -483,36 +484,46 @@ import cherry.android.camera.util.CameraUtil;
     }
 
     @Override
-    public CaptureCallback getCaptureCallback() {
-        return mCallback;
-    }
-
-    @Override
     public void setPreviewCallback(PreviewCallback callback) {
         mPreviewCallback = callback;
     }
 
     @Override
-    public List<int[]> getSupportPreviewSizes() {
-        List<int[]> supportedSizes = null;
-        Size[] sizes = getSupportPreviewSizesInternal();
-        if (sizes != null) {
-            supportedSizes = new ArrayList<>(sizes.length);
-            for (Size size : sizes) {
-                int[] sizeArr = new int[]{mSupplier.width(size), mSupplier.height(size)};
-                supportedSizes.add(sizeArr);
+    public List<SizeExt> getSupportPreviewSizes() {
+        return InternalCollections.mapList(getSupportPreviewSizesInternal(), new Function<Size, SizeExt>() {
+            @Override
+            public SizeExt apply(Size size) {
+                return new SizeExt(size.getWidth(), size.getHeight());
             }
-        }
-        return supportedSizes;
+        });
     }
 
-    private Size[] getSupportPreviewSizesInternal() {
+    @Override
+    public List<SizeExt> getSupportPictureSizes() {
+        return InternalCollections.mapList(getSupportPictureSizesInternal(), new Function<Size, SizeExt>() {
+            @Override
+            public SizeExt apply(Size size) {
+                return new SizeExt(size.getWidth(), size.getHeight());
+            }
+        });
+    }
+
+    private List<Size> getSupportPictureSizesInternal() {
         CameraCharacteristics characteristics = getCharacteristics();
         if (characteristics != null) {
             StreamConfigurationMap map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
-            return map.getOutputSizes(SurfaceTexture.class);
+            return Arrays.asList(map.getOutputSizes(mImageFormat));
         }
-        return null;
+        return Collections.emptyList();
+    }
+
+    private List<Size> getSupportPreviewSizesInternal() {
+        CameraCharacteristics characteristics = getCharacteristics();
+        if (characteristics != null) {
+            StreamConfigurationMap map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
+            return Arrays.asList(map.getOutputSizes(SurfaceTexture.class));
+        }
+        return Collections.emptyList();
     }
 
     @Override
@@ -582,42 +593,34 @@ import cherry.android.camera.util.CameraUtil;
     }
 
     private void resolvePreviewSize() {
-        Size[] sizes = getSupportPreviewSizesInternal();
-        Size previewSize;
+        List<SizeExt> sizeExts = getSupportPreviewSizes();
+        SizeExt previewSize;
         if (mPreviewWidth != 0 && mPreviewHeight != 0) {
-            previewSize = CameraUtil.getOptimalPreviewSizeWithTarget(sizes,
-                    mPreviewWidth, mPreviewHeight, mSupplier);
+            previewSize = CameraUtil.getOptimalPreviewSizeWithTarget(sizeExts,
+                    mPreviewWidth, mPreviewHeight);
         } else {
-            double screenRatio = CameraUtil.findFullscreenRatio(mContext, sizes, mSupplier);
-            previewSize = CameraUtil.getOptimalPreviewSize(mContext, sizes, screenRatio, false, mSupplier);
+            double screenRatio = CameraUtil.findFullscreenRatio(mContext, sizeExts);
+            previewSize = CameraUtil.getOptimalPreviewSize(mContext, sizeExts, screenRatio, false);
         }
-        mPreviewWidth = previewSize.getWidth();
-        mPreviewHeight = previewSize.getHeight();
+        mPreviewWidth = previewSize.width();
+        mPreviewHeight = previewSize.height();
         if (mPreviewCallback != null) {
             mPreviewCallback.onSizeChanged(mPreviewWidth, mPreviewHeight);
         }
     }
 
-    private SizeSupplier<Size> mSupplier = new SizeSupplier<Size>() {
-        @Override
-        public int width(Size size) {
-            return size.getWidth();
-        }
-
-        @Override
-        public int height(Size size) {
-            return size.getHeight();
-        }
-    };
-
-    private static int checkCameraId(@CameraId int cameraId) {
-        switch (cameraId) {
-            case CameraId.CAMERA_FRONT:
-                return CameraCharacteristics.LENS_FACING_BACK;
-            case CameraId.CAMERA_BACK:
-                return CameraCharacteristics.LENS_FACING_FRONT;
-            default:
-                throw new IllegalStateException("cameraId is Unsupported. cameraId=" + cameraId);
-        }
+    @IntDef({
+            StateInternal.PREVIEW,
+            StateInternal.WAITING_LOCK,
+            StateInternal.WAITING_PRECAPTURE,
+            StateInternal.WAITING_NON_PRECAPTURE,
+            StateInternal.PICTURE_TAKEN,
+    })
+    private @interface StateInternal {
+        int PREVIEW = 0;
+        int WAITING_LOCK = 1;
+        int WAITING_PRECAPTURE = 2;
+        int WAITING_NON_PRECAPTURE = 3;
+        int PICTURE_TAKEN = 4;
     }
 }

@@ -10,7 +10,7 @@ import java.io.ByteArrayOutputStream;
 
 import cherry.android.camera.camera.ICamera;
 
-import static cherry.android.camera.util.BitmapUtil.decodeBitmap;
+import static cherry.android.camera.utils.BitmapUtil.decodeBitmap;
 
 /**
  * Created by ROOT on 2017/8/9.
@@ -21,20 +21,17 @@ public class Camera1CaptureBody implements CaptureBody {
     private Context context;
     private byte[] bytes;
     private Bitmap bitmap;
-    private ICamera iCamera;
     private Matrix matrix;
     private int id = -1;
 
-    public Camera1CaptureBody(@NonNull Context context, @NonNull byte[] bytes, @NonNull ICamera iCamera) {
+    public Camera1CaptureBody(@NonNull Context context, @NonNull byte[] bytes) {
         this.context = context;
         this.bytes = bytes;
-        this.iCamera = iCamera;
     }
 
-    public Camera1CaptureBody(@NonNull Context context, int id, @NonNull byte[] bytes, @NonNull ICamera iCamera) {
+    public Camera1CaptureBody(@NonNull Context context, int id, @NonNull byte[] bytes) {
         this.context = context;
         this.bytes = bytes;
-        this.iCamera = iCamera;
         this.id = id;
     }
 

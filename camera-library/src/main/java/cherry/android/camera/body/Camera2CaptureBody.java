@@ -9,7 +9,7 @@ import android.support.annotation.NonNull;
 
 import java.nio.ByteBuffer;
 
-import static cherry.android.camera.util.BitmapUtil.decodeBitmap;
+import static cherry.android.camera.utils.BitmapUtil.decodeBitmap;
 
 /**
  * Created by ROOT on 2017/8/9.

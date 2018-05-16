@@ -19,7 +19,7 @@ import cherry.android.camera.filter.YUVFilter;
 import cherry.android.camera.opengl.GLRotation;
 import cherry.android.camera.opengl.OpenGLUtils;
 import cherry.android.camera.opengl.Rotation;
-import cherry.android.camera.util.CameraLog;
+import cherry.android.camera.utils.CameraLog;
 
 /**
  * Created by Administrator on 2017/4/6.
@@ -27,21 +27,17 @@ import cherry.android.camera.util.CameraLog;
 
 public class CaptureRenderer implements GLSurfaceView.Renderer, SurfaceTexture.OnFrameAvailableListener {
 
+    public static final int STATE_CAPTURE = 0;
+    public static final int STATE_PICTURE = 1;
     private static final String TAG = "CaptureRenderer";
-
     private Context mContext;
     private GLSurfaceView mGLSurfaceView;
-
     private RendererFilter mFilter;
     private SurfaceTexture mSurfaceTexture;
     private int mTextureId = OpenGLUtils.NO_TEXTURE;
     private CameraCompact mCameraCompact;
-
     private ArrayMap<Integer, RendererFilter> mFilterMap;
     private Bitmap mBitmap;
-
-    public static final int STATE_CAPTURE = 0;
-    public static final int STATE_PICTURE = 1;
     private int mState;
 
     private OnFilterChangeListener mFilterChangeListener;

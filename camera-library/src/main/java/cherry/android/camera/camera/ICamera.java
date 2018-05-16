@@ -5,7 +5,6 @@ import java.util.List;
 import cherry.android.camera.CaptureCallback;
 import cherry.android.camera.PreviewCallback;
 import cherry.android.camera.annotations.CameraId;
-import cherry.android.camera.annotations.CameraState;
 
 /**
  * Created by Administrator on 2017/4/6.
@@ -13,15 +12,13 @@ import cherry.android.camera.annotations.CameraState;
 
 public interface ICamera {
 
-    void setPreviewSize(int width, int height);
-
-    void openCamera(@CameraId int cameraId) throws Exception;
+    void openCamera(@CameraId int cameraId);
 
     void closeCamera();
 
-    void capture() throws Exception;
+    void capture();
 
-    void captureBurst();
+    void continuousCapture();
 
     void startPreview();
 
@@ -31,9 +28,9 @@ public interface ICamera {
 
     void setCaptureCallback(CaptureCallback cb);
 
-    CaptureCallback getCaptureCallback();
-
     void setPreviewCallback(PreviewCallback callback);
 
-    List<int[]> getSupportPreviewSizes();
+    List<SizeExt> getSupportPreviewSizes();
+
+    List<SizeExt> getSupportPictureSizes();
 }

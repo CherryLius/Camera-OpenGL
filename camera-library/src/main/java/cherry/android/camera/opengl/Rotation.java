@@ -8,21 +8,6 @@ public enum Rotation {
 
     ROTATION_0, ROTATION_90, ROTATION_180, ROTATION_270;
 
-    public int value() {
-        switch (this) {
-            case ROTATION_0:
-                return 0;
-            case ROTATION_90:
-                return 90;
-            case ROTATION_180:
-                return 180;
-            case ROTATION_270:
-                return 270;
-            default:
-                throw new IllegalStateException("Rotation not Support: " + this);
-        }
-    }
-
     public static Rotation valueOf(int rotation) {
         switch (rotation) {
             case 0:
@@ -35,6 +20,21 @@ public enum Rotation {
                 return ROTATION_270;
             default:
                 throw new IllegalArgumentException("Unknown Rotation: " + rotation);
+        }
+    }
+
+    public int value() {
+        switch (this) {
+            case ROTATION_0:
+                return 0;
+            case ROTATION_90:
+                return 90;
+            case ROTATION_180:
+                return 180;
+            case ROTATION_270:
+                return 270;
+            default:
+                throw new IllegalStateException("Rotation not Support: " + this);
         }
     }
 }

@@ -1,4 +1,4 @@
-package cherry.android.camera.util;
+package cherry.android.camera.utils;
 
 import android.text.TextUtils;
 import android.util.Log;

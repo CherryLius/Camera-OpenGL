@@ -38,13 +38,10 @@ public class ImageFilter implements RendererFilter {
     private static final String A_POSITION = "a_Position";
     private static final String A_TEXTURE_COORDINATE = "a_TextureCoordinate";
     private static final String U_IMAGE_TEXTURE = "u_ImageTexture";
-
-    private FloatBuffer mCubeBuffer;
-    private FloatBuffer mTextureBuffer;
-
     private final String mVertexShader;
     private final String mFragmentShader;
-
+    private FloatBuffer mCubeBuffer;
+    private FloatBuffer mTextureBuffer;
     private int mGLProgramId;
     private int mGLAttrPosition;
     private int mGLAttrTextureCoords;

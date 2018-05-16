@@ -9,7 +9,7 @@ import java.util.List;
 import cherry.android.camera.CaptureCallback;
 import cherry.android.camera.PreviewCallback;
 import cherry.android.camera.annotations.CameraId;
-import cherry.android.camera.util.CameraLog;
+import cherry.android.camera.utils.CameraLog;
 
 /**
  * Created by Administrator on 2017/4/6.
@@ -35,16 +35,12 @@ public class CameraCompact {
             mCamera.capture();
         } catch (Exception e) {
             e.printStackTrace();
-            CameraLog.e(TAG,"capture error", e);
+            CameraLog.e(TAG, "capture error", e);
         }
     }
 
     public void captureBurst() {
-        mCamera.captureBurst();
-    }
-
-    public void setPreviewSize(final int width, final int height) {
-        mCamera.setPreviewSize(width, height);
+        mCamera.continuousCapture();
     }
 
     public void start(@CameraId int cameraId) {
@@ -86,7 +82,7 @@ public class CameraCompact {
         return mCamera;
     }
 
-    public List<int[]> getSupportPreviewSizes() {
+    public List<SizeExt> getSupportPreviewSizes() {
         return mCamera.getSupportPreviewSizes();
     }
 

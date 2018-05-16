@@ -9,19 +9,20 @@ import android.support.annotation.NonNull;
 import android.util.Log;
 
 import java.io.IOException;
-import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.locks.ReentrantLock;
 
 import cherry.android.camera.CaptureCallback;
 import cherry.android.camera.ImageManager;
 import cherry.android.camera.PreviewCallback;
-import cherry.android.camera.SizeSupplier;
 import cherry.android.camera.annotations.CameraId;
 import cherry.android.camera.annotations.CameraState;
 import cherry.android.camera.body.Camera1CaptureBody;
-import cherry.android.camera.util.CameraLog;
-import cherry.android.camera.util.CameraUtil;
+import cherry.android.camera.utils.CameraLog;
+import cherry.android.camera.utils.CameraUtil;
+import cherry.android.camera.utils.InternalCollections;
+import ext.java8.function.Function;
 
 import static cherry.android.camera.annotations.CameraState.STATE_CAPTURE_BURST;
 import static cherry.android.camera.annotations.CameraState.STATE_CAPTURE_ONCE;
@@ -33,19 +34,12 @@ import static cherry.android.camera.annotations.CameraState.STATE_PREVIEW;
 
 public class Camera1 extends AbstractCamera<Camera> implements Camera.PreviewCallback {
     private static final String TAG = "Camera1";
-
     private Camera.Parameters mParameters;
     private Camera.CameraInfo mCameraInfo;
-
     private CaptureCallback mCallback;
-
-    private int mDefaultPreviewWidth;
-    private int mDefaultPreviewHeight;
-
     private int mContinuous = -1;
     @CameraState
     private int mState = STATE_PREVIEW;
-
     private ReentrantLock mCameraLock;
     private byte[] mCallbackBuffer;
     private PreviewCallback mPreviewCallback;
@@ -56,32 +50,39 @@ public class Camera1 extends AbstractCamera<Camera> implements Camera.PreviewCal
         mCameraLock = new ReentrantLock();
     }
 
-    @Override
-    public void setPreviewSize(int width, int height) {
-        if (mDefaultPreviewWidth == width && mDefaultPreviewHeight == height) {
-            CameraLog.i(TAG, "same preview size. skip " + width + "x" + height);
-            return;
+    private static int getDisplayOrientation(int degrees, int cameraId) {
+        Camera.CameraInfo info = new Camera.CameraInfo();
+        Camera.getCameraInfo(cameraId, info);
+        int result;
+        if (info.facing == Camera.CameraInfo.CAMERA_FACING_FRONT) {
+            result = (info.orientation + degrees) % 360;
+            // compensate the mirror
+            result = (360 - result) % 360;
+        } else { // back-facing
+            result = (info.orientation - degrees + 360) % 360;
         }
-        mDefaultPreviewWidth = width;
-        mDefaultPreviewHeight = height;
-        if (mCameraDriver != null) {
-            mCameraDriver.setPreviewCallbackWithBuffer(null);
-            stopPreview();
-            resolvePreviewSize();
-            mCameraDriver.setParameters(mParameters);
-            Camera.Size previewSize = mParameters.getPreviewSize();
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.ICE_CREAM_SANDWICH_MR1) {
-                mSurfaceTexture.setDefaultBufferSize(previewSize.width, previewSize.height);
-            }
-            mCallbackBuffer = calculateBuffer(previewSize.width, previewSize.height);
-            mCameraDriver.addCallbackBuffer(mCallbackBuffer);
-            mCameraDriver.setPreviewCallbackWithBuffer(this);
-            startPreview();
+        return result;
+    }
+
+    private static byte[] calculateBuffer(int width, int height) {
+        final int size = (width * height) * ImageFormat.getBitsPerPixel(ImageFormat.NV21) / 8;
+        CameraLog.e(TAG, "open callback buffer size=" + size);
+        return new byte[size];
+    }
+
+    private static int checkCameraId(@CameraId int cameraId) {
+        switch (cameraId) {
+            case CameraId.CAMERA_FRONT:
+                return Camera.CameraInfo.CAMERA_FACING_FRONT;
+            case CameraId.CAMERA_BACK:
+                return Camera.CameraInfo.CAMERA_FACING_BACK;
+            default:
+                throw new IllegalStateException("cameraId is Unsupported. cameraId=" + cameraId);
         }
     }
 
     @Override
-    public void openCamera(@CameraId int cameraId) throws Exception {
+    public void openCamera(@CameraId int cameraId) {
         super.openCamera(cameraId);
         mRealCameraId = checkCameraId(cameraId);
 
@@ -93,6 +94,7 @@ public class Camera1 extends AbstractCamera<Camera> implements Camera.PreviewCal
                     CameraLog.i(TAG, "openCamera");
                     mCameraDriver = Camera.open(mRealCameraId);
 
+                    mParameters = mCameraDriver.getParameters();
                     setupCameraParams();
                     mCameraDriver.setParameters(mParameters);
                     Camera.Size previewSize = mParameters.getPreviewSize();
@@ -105,6 +107,7 @@ public class Camera1 extends AbstractCamera<Camera> implements Camera.PreviewCal
                     mCameraDriver.addCallbackBuffer(mCallbackBuffer);
                     mCameraDriver.setPreviewCallbackWithBuffer(Camera1.this);
                     mCameraDriver.startPreview();
+
                     mCameraLock.unlock();
                 } catch (IOException e) {
                     throw new RuntimeException(e);
@@ -128,22 +131,82 @@ public class Camera1 extends AbstractCamera<Camera> implements Camera.PreviewCal
         }
     }
 
+    private void resolvePreviewSize() {
+        final List<SizeExt> supportPreviewSizes = getSupportPreviewSizes();
+        for (SizeExt size : supportPreviewSizes) {
+            CameraLog.e(TAG, "support preview size=" + size.width() + "x" + size.height());
+        }
+
+        SizeExt previewOn;
+        if (mConfiguration != null && mConfiguration.getPreviewSizeExt() != null) {
+            final SizeExt sizeExt = mConfiguration.getPreviewSizeExt();
+            previewOn = CameraUtil.getOptimalPreviewSizeWithTarget(supportPreviewSizes,
+                    sizeExt.width(),
+                    sizeExt.height());
+        } else {
+            double screenRatio = CameraUtil.findFullscreenRatio(mContext, getSupportPictureSizes());
+            previewOn = CameraUtil.getOptimalPreviewSize(mContext, supportPreviewSizes, screenRatio, false);
+        }
+        mParameters.setPreviewSize(previewOn.width(), previewOn.height());
+        Log.e(TAG, "optimal preview size: " + previewOn.width() + "x" + previewOn.height());
+        if (mPreviewCallback != null) {
+            mPreviewCallback.onSizeChanged(previewOn.width(), previewOn.height());
+        }
+    }
+
     @Override
-    public void capture() throws Exception {
+    protected void onConfigureChanged(CameraConfiguration oldConfig, CameraConfiguration newConfig) {
+        resolvePreviewChange(oldConfig.getPreviewSizeExt(), newConfig.getPreviewSizeExt());
+    }
+
+    private void resolvePreviewChange(SizeExt oldSizeExt, SizeExt newSizeExt) {
+        if (mCameraDriver == null) {
+            CameraLog.w(TAG, "camera not ready.");
+            return;
+        }
+        if (oldSizeExt == null && newSizeExt == null) {
+            CameraLog.w(TAG, "skip with invalid size.");
+            return;
+        }
+        if (oldSizeExt != null && newSizeExt != null) {
+            Camera.Size previewSize = mParameters.getPreviewSize();
+            final int width = previewSize.width;
+            final int height = previewSize.height;
+            if ((oldSizeExt.width() == newSizeExt.width() && oldSizeExt.height() == newSizeExt.height())
+                    || (newSizeExt.width() == width && newSizeExt.height() == height)) {
+                CameraLog.w(TAG, "same preview size. skip: " + width + "x" + height);
+                return;
+            }
+        }
+        mCameraDriver.setPreviewCallbackWithBuffer(null);
+        stopPreview();
+        resolvePreviewSize();
+        mCameraDriver.setParameters(mParameters);
+        Camera.Size previewOn = mParameters.getPreviewSize();
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.ICE_CREAM_SANDWICH_MR1) {
+            mSurfaceTexture.setDefaultBufferSize(previewOn.width, previewOn.height);
+        }
+        mCallbackBuffer = calculateBuffer(previewOn.width, previewOn.height);
+        mCameraDriver.addCallbackBuffer(mCallbackBuffer);
+        mCameraDriver.setPreviewCallbackWithBuffer(this);
+        startPreview();
+    }
+
+    @Override
+    public void capture() {
         mState = STATE_CAPTURE_ONCE;
         capture(new Camera.PictureCallback() {
             @Override
             public void onPictureTaken(byte[] data, Camera camera) {
                 stopPreview();
-                //mCameraHandler.post(new ImageSaver(mContext, data, Camera1.this));
-                ImageManager.instance().execute(new Camera1CaptureBody(mContext, data, Camera1.this), Camera1.this);
-                //startPreview();
+                ImageManager.instance().execute(new Camera1CaptureBody(mContext, data), Camera1.this);
             }
         });
     }
 
+
     @Override
-    public void captureBurst() {
+    public void continuousCapture() {
         final int count = 10;
         mContinuous = 0;
         mCameraHandler.post(new Runnable() {
@@ -156,7 +219,7 @@ public class Camera1 extends AbstractCamera<Camera> implements Camera.PreviewCal
                         stopPreview();
                         CameraLog.e(TAG, Thread.currentThread().getName());
                         int index = mContinuous++;
-                        ImageManager.instance().execute(new Camera1CaptureBody(mContext, index, bytes, Camera1.this), Camera1.this);
+                        ImageManager.instance().execute(new Camera1CaptureBody(mContext, index, bytes), Camera1.this);
                         if (index < count - 1) {
                             startPreview();
                             capture(this);
@@ -206,28 +269,9 @@ public class Camera1 extends AbstractCamera<Camera> implements Camera.PreviewCal
         return (mCameraInfo.orientation - CameraUtil.getDisplayRotation(mContext) + 360) % 360;
     }
 
-    private static int getDisplayOrientation(int degrees, int cameraId) {
-        Camera.CameraInfo info = new Camera.CameraInfo();
-        Camera.getCameraInfo(cameraId, info);
-        int result;
-        if (info.facing == Camera.CameraInfo.CAMERA_FACING_FRONT) {
-            result = (info.orientation + degrees) % 360;
-            // compensate the mirror
-            result = (360 - result) % 360;
-        } else { // back-facing
-            result = (info.orientation - degrees + 360) % 360;
-        }
-        return result;
-    }
-
     @Override
     public void setCaptureCallback(CaptureCallback cb) {
         mCallback = cb;
-    }
-
-    @Override
-    public CaptureCallback getCaptureCallback() {
-        return mCallback;
     }
 
     @Override
@@ -236,21 +280,34 @@ public class Camera1 extends AbstractCamera<Camera> implements Camera.PreviewCal
     }
 
     @Override
-    public List<int[]> getSupportPreviewSizes() {
-        List<int[]> supportedSizes = null;
-        if (mParameters != null) {
-            List<Camera.Size> sizes = mParameters.getSupportedPreviewSizes();
-            supportedSizes = new ArrayList<>(sizes.size());
-            for (Camera.Size size : sizes) {
-                int[] sizeArr = new int[]{mSupplier.width(size), mSupplier.height(size)};
-                supportedSizes.add(sizeArr);
-            }
+    public List<SizeExt> getSupportPreviewSizes() {
+        if (mParameters == null) {
+            CameraLog.w(TAG, "camera not ready.");
+            return Collections.emptyList();
         }
-        return supportedSizes;
+        return InternalCollections.mapList(mParameters.getSupportedPreviewSizes(), new Function<Camera.Size, SizeExt>() {
+            @Override
+            public SizeExt apply(Camera.Size size) {
+                return new SizeExt(size.width, size.height);
+            }
+        });
+    }
+
+    @Override
+    public List<SizeExt> getSupportPictureSizes() {
+        if (mParameters == null) {
+            CameraLog.w(TAG, "camera not ready.");
+            return Collections.emptyList();
+        }
+        return InternalCollections.mapList(mParameters.getSupportedPictureSizes(), new Function<Camera.Size, SizeExt>() {
+            @Override
+            public SizeExt apply(Camera.Size size) {
+                return new SizeExt(size.width, size.height);
+            }
+        });
     }
 
     private void setupCameraParams() {
-        mParameters = mCameraDriver.getParameters();
         //mParameters.setFlashMode(Camera.Parameters.FLASH_MODE_OFF);
         mParameters.setPreviewFormat(ImageFormat.NV21);
         mParameters.setPictureFormat(ImageFormat.JPEG);
@@ -264,65 +321,20 @@ public class Camera1 extends AbstractCamera<Camera> implements Camera.PreviewCal
                 Camera.Parameters.FOCUS_MODE_CONTINUOUS_PICTURE)) {
             mParameters.setFocusMode(Camera.Parameters.FOCUS_MODE_CONTINUOUS_PICTURE);
         }
+        final List<SizeExt> supportPictureSizes = getSupportPictureSizes();
 
-        final Camera.Size[] supportPictureSizes = cameraSizesToArray(mParameters.getSupportedPictureSizes());
+        double screenRatio = CameraUtil.findFullscreenRatio(mContext, supportPictureSizes);
 
-        double screenRatio = CameraUtil.findFullscreenRatio(mContext, supportPictureSizes, mSupplier);
-
-        for (Camera.Size size : mParameters.getSupportedPictureSizes()) {
-            CameraLog.e(TAG, "support picture size=" + size.width + "x" + size.height);
+        for (SizeExt size : supportPictureSizes) {
+            CameraLog.e(TAG, "support picture size=" + size.width() + "x" + size.height());
         }
         //预览尺寸
         resolvePreviewSize();
         //照片尺寸
-        Camera.Size pictureSize = CameraUtil.getOptimalPictureSize(supportPictureSizes, screenRatio, mSupplier);
-        mParameters.setPictureSize(pictureSize.width, pictureSize.height);
-        Log.e(TAG, "optimal pic size: " + pictureSize.width + "x" + pictureSize.height);
+        SizeExt pictureSize = CameraUtil.getOptimalPictureSize(supportPictureSizes, screenRatio);
+        mParameters.setPictureSize(pictureSize.width(), pictureSize.height());
+        Log.e(TAG, "optimal pic size: " + pictureSize.width() + "x" + pictureSize.height());
     }
-
-    private void resolvePreviewSize() {
-        final Camera.Size[] supportPreviewSizes = cameraSizesToArray(mParameters.getSupportedPreviewSizes());
-        for (Camera.Size size : mParameters.getSupportedPreviewSizes()) {
-            CameraLog.e(TAG, "support preview size=" + size.width + "x" + size.height);
-        }
-
-        Camera.Size previewSize;
-        if (mDefaultPreviewWidth != 0 && mDefaultPreviewHeight != 0) {
-            previewSize = CameraUtil.getOptimalPreviewSizeWithTarget(supportPreviewSizes,
-                    mDefaultPreviewWidth,
-                    mDefaultPreviewHeight,
-                    mSupplier);
-        } else {
-            final Camera.Size[] supportPictureSizes = cameraSizesToArray(mParameters.getSupportedPictureSizes());
-            double screenRatio = CameraUtil.findFullscreenRatio(mContext, supportPictureSizes, mSupplier);
-            previewSize = CameraUtil.getOptimalPreviewSize(mContext, supportPreviewSizes, screenRatio, false, mSupplier);
-
-        }
-        mDefaultPreviewWidth = previewSize.width;
-        mDefaultPreviewHeight = previewSize.height;
-        mParameters.setPreviewSize(previewSize.width, previewSize.height);
-        Log.e(TAG, "optimal preview size: " + previewSize.width + "x" + previewSize.height);
-        if (mPreviewCallback != null) {
-            mPreviewCallback.onSizeChanged(previewSize.width, previewSize.height);
-        }
-    }
-
-    @NonNull
-    private Camera.Size[] cameraSizesToArray(@NonNull List<Camera.Size> sizes) {
-        return sizes.toArray(new Camera.Size[]{});
-    }
-
-    private final SizeSupplier<Camera.Size> mSupplier = new SizeSupplier<Camera.Size>() {
-        @Override
-        public int width(Camera.Size size) {
-            return size.width;
-        }
-
-        @Override
-        public int height(Camera.Size size) {
-            return size.height;
-        }
-    };
 
     @Override
     public void onPreviewFrame(byte[] bytes, Camera camera) {
@@ -331,22 +343,5 @@ public class Camera1 extends AbstractCamera<Camera> implements Camera.PreviewCal
             mPreviewCallback.onPreview(this, bytes, size.width, size.height);
         }
         camera.addCallbackBuffer(mCallbackBuffer);
-    }
-
-    private static byte[] calculateBuffer(int width, int height) {
-        final int size = (width * height) * ImageFormat.getBitsPerPixel(ImageFormat.NV21) / 8;
-        CameraLog.e(TAG, "open callback buffer size=" + size);
-        return new byte[size];
-    }
-
-    private static int checkCameraId(@CameraId int cameraId) {
-        switch (cameraId) {
-            case CameraId.CAMERA_FRONT:
-                return Camera.CameraInfo.CAMERA_FACING_FRONT;
-            case CameraId.CAMERA_BACK:
-                return Camera.CameraInfo.CAMERA_FACING_BACK;
-            default:
-                throw new IllegalStateException("cameraId is Unsupported. cameraId=" + cameraId);
-        }
     }
 }

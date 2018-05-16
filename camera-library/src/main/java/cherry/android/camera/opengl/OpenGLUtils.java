@@ -12,7 +12,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 
-import cherry.android.camera.util.CameraLog;
+import cherry.android.camera.utils.CameraLog;
 
 import static android.opengl.GLES20.GL_CLAMP_TO_EDGE;
 import static android.opengl.GLES20.GL_COMPILE_STATUS;
@@ -45,9 +45,8 @@ import static android.opengl.GLES20.glTexParameterf;
 
 public class OpenGLUtils {
 
-    private static final String TAG = "OpenGLUtils";
-
     public static final int NO_TEXTURE = -1;
+    private static final String TAG = "OpenGLUtils";
 
     /**
      * 创建可执行的OpenGL ES program

@@ -1,6 +1,5 @@
 package cherry.android.camera;
 
-import android.annotation.TargetApi;
 import android.content.Context;
 import android.os.Handler;
 import android.os.HandlerThread;
@@ -15,9 +14,9 @@ import cherry.android.camera.body.CaptureBody;
 import cherry.android.camera.camera.ICamera;
 import cherry.android.camera.provider.DefaultProvider;
 import cherry.android.camera.provider.IProvider;
-import cherry.android.camera.util.CameraLog;
+import cherry.android.camera.utils.CameraLog;
 
-import static cherry.android.camera.util.BitmapUtil.fileScan;
+import static cherry.android.camera.utils.BitmapUtil.fileScan;
 
 /**
  * Created by Administrator on 2017/4/26.
@@ -32,6 +31,10 @@ public class ImageManager {
     private HandlerThread mBackgroundThread;
     private Handler mBackgroundHandler;
 
+    private ImageManager() {
+        startBackgroundThread();
+    }
+
     public static ImageManager instance() {
         if (sInstance == null)
             synchronized (ImageManager.class) {
@@ -39,10 +42,6 @@ public class ImageManager {
                     sInstance = new ImageManager();
             }
         return sInstance;
-    }
-
-    private ImageManager() {
-        startBackgroundThread();
     }
 
     public void execute(@NonNull final CaptureBody captureBody, @NonNull final ICamera iCamera) {

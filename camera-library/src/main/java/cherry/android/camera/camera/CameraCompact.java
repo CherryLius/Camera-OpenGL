@@ -6,7 +6,6 @@ import android.os.Build;
 
 import java.util.List;
 
-import cherry.android.camera.CaptureCallback;
 import cherry.android.camera.PreviewCallback;
 import cherry.android.camera.annotations.CameraId;
 import cherry.android.camera.utils.CameraLog;

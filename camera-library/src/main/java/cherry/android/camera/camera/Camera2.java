@@ -34,7 +34,6 @@ import java.util.List;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 
-import cherry.android.camera.CaptureCallback;
 import cherry.android.camera.ImageManager;
 import cherry.android.camera.PreviewCallback;
 import cherry.android.camera.annotations.CameraId;
@@ -74,7 +73,6 @@ class Camera2 extends AbstractCamera<CameraDevice> implements ICamera, ImageRead
     private CameraCaptureSession mCaptureSession;
     private CaptureRequest.Builder mPreviewRequestBuilder;
     private CaptureRequest mPreviewRequest;
-    private CaptureCallback mCallback;
     private int mImageFormat = ImageFormat.YUV_420_888;
     private int mPreviewWidth, mPreviewHeight;
     private PreviewCallback mPreviewCallback;
@@ -289,9 +287,9 @@ class Camera2 extends AbstractCamera<CameraDevice> implements ICamera, ImageRead
                     int count = ++mContinuous;
                     CameraLog.e(TAG, "count=" + count);
                     if (count >= total) {
-                        if (mCallback != null) {
-                            mCallback.onBurstComplete();
-                        }
+//                        if (mCallback != null) {
+//                            mCallback.onBurstComplete();
+//                        }
                         startPreview();
                         mContinuous = -1;
                     }
@@ -476,11 +474,6 @@ class Camera2 extends AbstractCamera<CameraDevice> implements ICamera, ImageRead
         CameraLog.d(TAG, "getDisplayRotation=%d", CameraUtil.getDisplayRotation(mContext));
         CameraLog.i(TAG, "getOrientation ret=%d", (getSensorOrientation() + 270 - CameraUtil.getDisplayRotation(mContext)) % 360);
         return (getSensorOrientation() + 270 - CameraUtil.getDisplayRotation(mContext)) % 360;
-    }
-
-    @Override
-    public void setCaptureCallback(CaptureCallback cb) {
-        mCallback = cb;
     }
 
     @Override

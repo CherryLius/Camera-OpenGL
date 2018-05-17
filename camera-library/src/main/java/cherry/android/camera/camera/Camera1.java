@@ -13,7 +13,6 @@ import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.locks.ReentrantLock;
 
-import cherry.android.camera.CaptureCallback;
 import cherry.android.camera.ImageManager;
 import cherry.android.camera.PreviewCallback;
 import cherry.android.camera.annotations.CameraId;
@@ -23,6 +22,7 @@ import cherry.android.camera.utils.CameraLog;
 import cherry.android.camera.utils.CameraUtil;
 import cherry.android.camera.utils.InternalCollections;
 import ext.java8.function.Function;
+import ext.java8.function.Supplier;
 
 import static cherry.android.camera.annotations.CameraState.STATE_CAPTURE_BURST;
 import static cherry.android.camera.annotations.CameraState.STATE_CAPTURE_ONCE;
@@ -36,7 +36,6 @@ public class Camera1 extends AbstractCamera<Camera> implements Camera.PreviewCal
     private static final String TAG = "Camera1";
     private Camera.Parameters mParameters;
     private Camera.CameraInfo mCameraInfo;
-    private CaptureCallback mCallback;
     private int mContinuous = -1;
     @CameraState
     private int mState = STATE_PREVIEW;
@@ -79,6 +78,20 @@ public class Camera1 extends AbstractCamera<Camera> implements Camera.PreviewCal
             default:
                 throw new IllegalStateException("cameraId is Unsupported. cameraId=" + cameraId);
         }
+    }
+
+    private static List<SizeExt> convertSize(@NonNull Supplier<List<Camera.Size>> supplier) {
+        List<Camera.Size> src = supplier.get();
+        if (src == null) {
+            CameraLog.w(TAG, "camera not ready.");
+            return Collections.emptyList();
+        }
+        return InternalCollections.mapList(src, new Function<Camera.Size, SizeExt>() {
+            @Override
+            public SizeExt apply(Camera.Size size) {
+                return new SizeExt(size.width, size.height);
+            }
+        });
     }
 
     @Override
@@ -156,10 +169,10 @@ public class Camera1 extends AbstractCamera<Camera> implements Camera.PreviewCal
 
     @Override
     protected void onConfigureChanged(CameraConfiguration oldConfig, CameraConfiguration newConfig) {
-        resolvePreviewChange(oldConfig.getPreviewSizeExt(), newConfig.getPreviewSizeExt());
+        resolveIfPreviewChange(oldConfig.getPreviewSizeExt(), newConfig.getPreviewSizeExt());
     }
 
-    private void resolvePreviewChange(SizeExt oldSizeExt, SizeExt newSizeExt) {
+    private void resolveIfPreviewChange(SizeExt oldSizeExt, SizeExt newSizeExt) {
         if (mCameraDriver == null) {
             CameraLog.w(TAG, "camera not ready.");
             return;
@@ -203,7 +216,6 @@ public class Camera1 extends AbstractCamera<Camera> implements Camera.PreviewCal
             }
         });
     }
-
 
     @Override
     public void continuousCapture() {
@@ -270,39 +282,32 @@ public class Camera1 extends AbstractCamera<Camera> implements Camera.PreviewCal
     }
 
     @Override
-    public void setCaptureCallback(CaptureCallback cb) {
-        mCallback = cb;
-    }
-
-    @Override
     public void setPreviewCallback(PreviewCallback callback) {
         this.mPreviewCallback = callback;
     }
 
     @Override
     public List<SizeExt> getSupportPreviewSizes() {
-        if (mParameters == null) {
-            CameraLog.w(TAG, "camera not ready.");
-            return Collections.emptyList();
-        }
-        return InternalCollections.mapList(mParameters.getSupportedPreviewSizes(), new Function<Camera.Size, SizeExt>() {
+        return convertSize(new Supplier<List<Camera.Size>>() {
             @Override
-            public SizeExt apply(Camera.Size size) {
-                return new SizeExt(size.width, size.height);
+            public List<Camera.Size> get() {
+                if (mParameters != null) {
+                    return mParameters.getSupportedPreviewSizes();
+                }
+                return null;
             }
         });
     }
 
     @Override
     public List<SizeExt> getSupportPictureSizes() {
-        if (mParameters == null) {
-            CameraLog.w(TAG, "camera not ready.");
-            return Collections.emptyList();
-        }
-        return InternalCollections.mapList(mParameters.getSupportedPictureSizes(), new Function<Camera.Size, SizeExt>() {
+        return convertSize(new Supplier<List<Camera.Size>>() {
             @Override
-            public SizeExt apply(Camera.Size size) {
-                return new SizeExt(size.width, size.height);
+            public List<Camera.Size> get() {
+                if (mParameters != null) {
+                    return mParameters.getSupportedPictureSizes();
+                }
+                return null;
             }
         });
     }
@@ -314,9 +319,9 @@ public class Camera1 extends AbstractCamera<Camera> implements Camera.PreviewCal
         mParameters.setRotation(90);
 
         List<String> focusModes = mParameters.getSupportedFocusModes();
-//        if (focusModes.contains(Camera.Parameters.FOCUS_MODE_CONTINUOUS_VIDEO)) {
-//            mParameters.setFocusMode(Camera.Parameters.FOCUS_MODE_CONTINUOUS_VIDEO);
-//        }
+        //if (focusModes.contains(Camera.Parameters.FOCUS_MODE_CONTINUOUS_VIDEO)) {
+        //    mParameters.setFocusMode(Camera.Parameters.FOCUS_MODE_CONTINUOUS_VIDEO);
+        //}
         if (focusModes.contains(
                 Camera.Parameters.FOCUS_MODE_CONTINUOUS_PICTURE)) {
             mParameters.setFocusMode(Camera.Parameters.FOCUS_MODE_CONTINUOUS_PICTURE);

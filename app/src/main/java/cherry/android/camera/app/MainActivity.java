@@ -1,6 +1,7 @@
 package cherry.android.camera.app;
 
 import android.Manifest;
+import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.opengl.GLSurfaceView;
 import android.os.Bundle;
@@ -10,7 +11,6 @@ import android.support.v4.content.ContextCompat;
 import android.support.v7.app.AppCompatActivity;
 import android.view.View;
 
-import cherry.android.camera.CaptureCallback;
 import cherry.android.camera.ImageManager;
 import cherry.android.camera.body.CaptureBody;
 import cherry.android.camera.renderer.CaptureRenderer;
@@ -90,7 +90,8 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     public void onClick(View v) {
         switch (v.getId()) {
             case R.id.btn_capture:
-                captureRenderer.getCameraCompat().capture();
+                //captureRenderer.getCameraCompat().capture();
+                startActivity(new Intent(this, ShapeActivity.class));
                 break;
         }
     }

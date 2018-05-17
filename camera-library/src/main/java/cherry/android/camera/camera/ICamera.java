@@ -2,7 +2,6 @@ package cherry.android.camera.camera;
 
 import java.util.List;
 
-import cherry.android.camera.CaptureCallback;
 import cherry.android.camera.PreviewCallback;
 import cherry.android.camera.annotations.CameraId;
 
@@ -25,8 +24,6 @@ public interface ICamera {
     void stopPreview();
 
     int getOrientation();
-
-    void setCaptureCallback(CaptureCallback cb);
 
     void setPreviewCallback(PreviewCallback callback);
 
